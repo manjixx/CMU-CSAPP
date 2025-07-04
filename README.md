@@ -6,3 +6,7 @@
 [2015-Fall 课件地址](http://www.cs.cmu.edu/afs/cs/academic/class/15213-f15/www/schedule.html)
 [Computer Systems: A Programmer's Perspective, 3/E (CS:APP3e)](http://csapp.cs.cmu.edu/3e/home.html)
 [2022-Fall](http://www.cs.cmu.edu/~213/schedule.html)
+
+[参考笔记](https://blog.csdn.net/qq_16933601/category_10429229.html)
+
+[参考笔记2](https://www.cnblogs.com/dongxb/category/1888858.html)
