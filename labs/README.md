@@ -68,11 +68,11 @@ docker pull ubuntu:latest@sha256:965fbcae990b0467ed5657caceaec165018ef44a4d2d46c
   - 从该ubuntu镜像创建容器，命名为csapp_env，且挂载csapp共享文件夹(对应容器根目录下的csapp文件夹)，之前下载的lab资源通过该文件夹和容器共享，
   - 命令中的/Users/xxxx/Desktop/csapp为共享文件夹的本地目录绝对路径。执行完创建容器的命令后会自动进入容器并打开容器的bash，后面的命令都是在容器中的bash执行的。
   - -p 7777:22：设置端口映射，将容器tcp22端口转发到7777（后续将通过该端口对容器进行访问），与已占用端口不冲突的情况下可以自由设置，自由设置时查看宿主机容器映射指令`docker port CONTAINER [PRIVATE_PORT[/PROTO]]`
-  - -v /Users/xxxx/Desktop/csapp:/csapp：将服务器目录与容器目录进行共享，方便本地与服务器（创建的Linux系统）之间的文件共享
+  - -v E:\\CMU-CSAPP\\labs:\code：将服务器目录与容器目录进行共享，方便本地与服务器（创建的Linux系统）之间的文件共享
   - ubuntu:lasted...：拉取的镜像名称。
 
 ```bash
-docker container run --platform linux/amd64 -it -p 7777:22 -v /Users/iiixv/Documents/CSAPP:csapp --name=csapp_env 6b7dfa7e8fdb /bin/bash     #6b7dfa7e8fdb 镜像id
+docker container run --platform linux/amd64 -it -p 7777:22 -v //e/CMU-CSAPP//labs:/code --name=csapp_env 6b7dfa7e8fdb /bin/bash     #6b7dfa7e8fdb 镜像id
 
 ```
 
@@ -125,7 +125,7 @@ PubkeyAuthentication yes    #启用公钥私钥配对认证方式
 AuthorizedKeysFile          .ssh/authorized_keys .ssh/authorized_keys2      #公钥文件路径
 ```
 
-- 同时再mac端侧 进入`/Users/iiixv/.ssh/id_rsa.pub`，复制文件内容
+- 同时再mac侧 进入`/Users/xxx/.ssh/id_rsa.pub`，复制文件内容
 
 - 在docker容器内，将上述内容粘贴至 `.ssh/authorized_keys`中
 
