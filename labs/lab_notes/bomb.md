@@ -214,10 +214,126 @@ layout regs
   400efb:	c3                   	retq   
 ```
 
-注意此处需要结合
+注意此处需要结合 x86-64 寄存器，明确每个寄存器的作用
 
-- 第2行，为函数分配栈帧
-- 第3行，设置函数strings_not_equal传入参数
-- 第4行，调用函数strings_not_equal，从字面意思理解，猜想如果传入字符串不同，则返回0
-- 第5、6行，函数strings_not_equal的返回值储存在%eax中，判断其是否为0，若为0，则跳至第8行，函数返回，炸弹拆除成功；若不为0，则跳至第7行
-- 第7行，调用explode_bomb函数，从字面意思理解，炸弹爆炸了。
+- 第2行，为函数分配栈帧（`%rsp`为栈指针）
+- 第3行，设置函数`strings_not_equal`传入参数,（`%esi`为栈指针）函数第二个参数
+- 第4行，调用函数 `strings_not_equal`，从字面意思理解，猜想如果传入字符串不同，则返回0
+- 第5、6行，函数`strings_not_equal`的返回值储存在`%eax`中（`%eax`表示函数返回值），判断其是否为0，若为0，则跳至第8行，函数返回，炸弹拆除成功；若不为0，则跳至第7行
+- 第7行，调用`explode_bomb`函数，从字面意思理解，炸弹爆炸了。
+- 第8行，清理栈空间
+
+调试步骤:
+
+```bash
+gdb run 
+file bomb
+b *0x400ee4
+r
+x/s 0x402400  # 正确答案
+quit
+```
+
+重新启动
+
+```bash
+gdb
+layout regs
+layout asm
+file bomb
+b phase_2
+r
+# 输入正确答案
+Phase 1 defused. How about the next one?
+c
+```
+
+### phase_2
+
+```asm
+0000000000400efc <phase_2>:
+  400efc:	55                   	push   %rbp
+  400efd:	53                   	push   %rbx
+  400efe:	48 83 ec 28          	sub    $0x28,%rsp   ; 分配40字节栈空间
+  400f02:	48 89 e6             	mov    %rsp,%rsi     ; rsi = rsp (栈顶地址作为参数)
+  400f05:	e8 52 05 00 00       	callq  40145c <read_six_numbers>    ; 调用read_six_numbers，读取6个数到栈上
+  400f0a:	83 3c 24 01          	cmpl   $0x1,(%rsp)              ; 比较栈顶第一个数是否等于1
+  400f0e:	74 20                	je     400f30 <phase_2+0x34>    ; 如果等于1，跳转到400f30
+  400f10:	e8 25 05 00 00       	callq  40143a <explode_bomb>    ; 否则爆炸
+  400f15:	eb 19                	jmp    400f30 <phase_2+0x34>    ; 跳转（冗余，因为爆炸后不会继续）
+  ; 循环部分
+  400f17:	8b 43 fc             	mov    -0x4(%rbx),%eax          ; 取前一个数（rbx-4）到eax
+  400f1a:	01 c0                	add    %eax,%eax                ; eax = eax * 2
+  400f1c:	39 03                	cmp    %eax,(%rbx)              ; 比较当前数(rbx指向)是否等于前一个数的两倍       
+  400f1e:	74 05                	je     400f25 <phase_2+0x29>    ; 相等则跳转
+  400f20:	e8 15 05 00 00       	callq  40143a <explode_bomb>    ; 否则爆炸
+  400f25:	48 83 c3 04          	add    $0x4,%rbx                ; rbx指向下一个数
+  400f29:	48 39 eb             	cmp    %rbp,%rbx                ; 比较rbx是否达到rbp（结束位置）
+  400f2c:	75 e9                	jne    400f17 <phase_2+0x1b>    ; 未达到则继续循环
+  400f2e:	eb 0c                	jmp    400f3c <phase_2+0x40>    ; 达到则跳出循环，函数结束
+  ; 初始化循环指针
+  400f30:	48 8d 5c 24 04       	lea    0x4(%rsp),%rbx           ; rbx指向第二个数（地址为rsp+4）
+  400f35:	48 8d 6c 24 18       	lea    0x18(%rsp),%rbp          ; rbp指向结束位置（rsp+24，即第六个数之后）
+  400f3a:	eb db                	jmp    400f17 <phase_2+0x1b>    ; 跳转到循环开始
+  ; 清理栈并返回
+  400f3c:	48 83 c4 28          	add    $0x28,%rsp
+  400f40:	5b                   	pop    %rbx
+  400f41:	5d                   	pop    %rbp
+  400f42:	c3                   	retq
+```
+
+接下来将逐步分析代码
+
+#### step 1
+
+```asm
+  400efc:	55                   	push   %rbp
+  400efd:	53                   	push   %rbx
+  400efe:	48 83 ec 28          	sub    $0x28,%rsp
+```
+
+- 第 2、3 行：将**被调用者保存寄存器的值**入栈
+- 第 4 行：分配栈帧
+
+### step 2
+
+```asm
+  400f02:	48 89 e6             	mov    %rsp,%rsi
+  400f05:	e8 52 05 00 00       	callq  40145c <read_six_numbers>
+```
+- 第 5 行：将栈顶指针`%rsp`传递给`%rsi`
+- 第 6 行：将`%rsi`作为参数调用`read_six_number`
+- 从字面意思理解，本题是要我们输入`6`个数字。这里`mov %rsp,%rsi`的目的是保存`caller`中栈顶的位置，方便在`read_six_numbers`中进行改值。我们不妨反汇编`read_six_numbers`
+
+此时栈的情况为
+
+![alt text](./pic/bomb/stack_1.png)
+
+### step3 反汇编 read_six_number
+
+因为此时栈中的值从`read_six_number`中获取，所以不妨进入 `read_six_number`看一下其汇编实现
+
+```asm
+(gdb) disassemble read_six_numbers
+Dump of assembler code for function read_six_numbers:
+   0x000000000040145c <+0>:     sub    $0x18,%rsp
+   0x0000000000401460 <+4>:     mov    %rsi,%rdx
+   0x0000000000401463 <+7>:     lea    0x4(%rsi),%rcx
+   0x0000000000401467 <+11>:    lea    0x14(%rsi),%rax
+   0x000000000040146b <+15>:    mov    %rax,0x8(%rsp)
+   0x0000000000401470 <+20>:    lea    0x10(%rsi),%rax
+   0x0000000000401474 <+24>:    mov    %rax,(%rsp)
+   0x0000000000401478 <+28>:    lea    0xc(%rsi),%r9
+   0x000000000040147c <+32>:    lea    0x8(%rsi),%r8
+   0x0000000000401480 <+36>:    mov    $0x4025c3,%esi
+   0x0000000000401485 <+41>:    mov    $0x0,%eax
+   0x000000000040148a <+46>:    callq  0x400bf0 <__isoc99_sscanf@plt>
+   0x000000000040148f <+51>:    cmp    $0x5,%eax
+   0x0000000000401492 <+54>:    jg     0x401499 <read_six_numbers+61>
+   0x0000000000401494 <+56>:    callq  0x40143a <explode_bomb>
+   0x0000000000401499 <+61>:    add    $0x18,%rsp
+   0x000000000040149d <+65>:    retq   
+End of assembler dump. 
+```
+
+**在这个函数中，要做到传6个参数，用来存储6个输入的数字**。很明显，这里传入了6个指针，其中4个存在寄存器上，另外2个存在栈上。由于phase_2函数中的栈指针rsp与这个函数中的rsi相等，所以把所有参数存在rsi之前的位置的目的是在返回phase_2函数后，能够直接利用phase_2函数的栈指针来连续地访问这6个数字
