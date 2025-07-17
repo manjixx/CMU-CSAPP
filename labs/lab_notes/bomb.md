@@ -295,7 +295,7 @@ c
 - 第 2、3 行：将**被调用者保存寄存器的值**入栈
 - 第 4 行：分配栈帧
 
-### step 2
+#### step 2
 
 ```asm
   400f02:	48 89 e6             	mov    %rsp,%rsi
@@ -309,7 +309,7 @@ c
 
 ![alt text](./pic/bomb/stack_1.png)
 
-### step3 反汇编 read_six_number
+#### step3 反汇编 read_six_number
 
 因为此时栈中的值从`read_six_number`中获取，所以不妨进入 `read_six_number`看一下其汇编实现
 
@@ -336,7 +336,7 @@ Dump of assembler code for function read_six_numbers:
 End of assembler dump. 
 ```
 
-在read_six_numbers中，它使用了传入的rsi（即phase_2的rsp）作为数组基址，然后计算出6个地址：
+在`read_six_numbers`中，它使用了传入的`rsi`（即`phase_2`的`rsp`）作为数组基址，然后计算出6个地址：
 
 **在这个函数中，要做到传6个参数，用来存储6个输入的数字**。
 
@@ -345,84 +345,8 @@ End of assembler dump.
 - 第二个是输入的模式串
 - 之后`6`个是读取`6`个的值存的地址，因为最多只能传6个寄存器参数，所以最后两个把内存地址存在栈中 。六个地址分别存在`%rdx, %rcx, %r8, %r9, (%rsp), 8(%rsp)`处，同时也在`0x0(%rsi), 0x4(%rsi), 0x8(%rsi), 0xc(%rsi), 0x10(%rsi), 0x14(%rsi)`处。
 
-由于`phase_2`函数中的栈指针`rsp`与这个函数中的`rsi`相等，所以把所有参数存在`rsi`之前的位置的目的是在返回`phase_2`函数后，能够直接利用`phase_2`函数的栈指针来连续地访问这6个数字
+由于`phase_2`函数中的栈指针`rsp`与这个函数中的`rsi`相等，所以把所有参数存在`rsi`之前的位置的目的是在返回`phase_2`函数后，能够**直接利用`phase_2`函数的栈指针来连续地访问这6个数字**
 
-下面的问题就是如何确定这6个数字的先后位置，**传递参数的寄存器使用顺序**如下：
-
-![alt text](./pic/bomb/usage_order.png)
-
-所以，我们应该输入的6个数字所在的位置就分别是：`R[%rsp]` `R[%rsp+0x8]` `%rsi` `%rsi+0x4` `%rsi+0x8` `%rsi+0xc`，此处说的是read_six_number的堆栈
-
-返回phase_2函数后，利用栈顶指针调用就是： `%rsp` `%rsp+0x4` `%rsp+0x8` `%rsp+0xc` `%rsp+0x10` `%rsp+0x14`，此处说的是 phase_2 的堆栈
-
- 总结：两个函数不共用同一个栈帧（各自的rsp不同），但是read_six_numbers将数据写入了phase_2的栈帧（通过phase_2传递过来的rsp值，即rsi）。
-
-您对关键点的理解**完全正确**！让我清晰地总结这个重要机制：
-
-### 核心机制：跨函数栈空间共享
-1. **`phase_2` 的栈指针传递**：
-   ```assembly
-   400f02: mov %rsp,%rsi  ; 将 phase_2 的栈顶地址存入 %rsi
-   ```
-   - 此时 `%rsi = phase_2 的 %rsp`
-
-2. **`read_six_numbers` 的内存操作**：
-   - 所有地址计算**基于传入的 %rsi**
-   ```assembly
-   mov %rsi,%rdx        ; 存储地址1 = %rsi + 0x00
-   lea 0x4(%rsi),%rcx   ; 存储地址2 = %rsi + 0x04
-   ...
-   mov %rax,(%rsp)      ; 临时存储地址5 = %rsi + 0x10
-   ```
-
-3. **关键区别**：
-   | 函数 | 寄存器 | 物理含义 | 等价关系 |
-   |------|--------|----------|----------|
-   | `phase_2` | `%rsp` | 该函数的栈顶 | `phase_2.rsp` |
-   | `read_six_numbers` | `%rsi` | 来自 phase_2 的栈顶 | `%rsi = phase_2.rsp` |
-   | `read_six_numbers` | `%rsp` | 该函数自己的栈顶 | `read.rsp ≠ phase_2.rsp` |
-
-### 内存访问验证
-#### 1. 在 `read_six_numbers` 中
-```plaintext
-read_six_numbers 栈帧：
-+-------------------------------+
-| 8(%rsp) → %rsi+0x14 (地址6)   | ← read.rsp+8
-+-------------------------------+
-| (%rsp)   → %rsi+0x10 (地址5)   | ← read.rsp
-+-------------------------------+
-| ... (read_six_numbers 的局部数据) |
-+-------------------------------+
-低地址
-```
-
-#### 2. 在 `phase_2` 中（`read_six_numbers` 返回后）
-```plaintext
-phase_2 栈帧：
-+-------------------------------+
-| %rsp+0x14 → 数字6             | 
-+-------------------------------+
-| %rsp+0x10 → 数字5             |
-+-------------------------------+
-| %rsp+0x0C → 数字4             |
-+-------------------------------+
-| %rsp+0x08 → 数字3             |
-+-------------------------------+
-| %rsp+0x04 → 数字2             |
-+-------------------------------+
-| %rsp+0x00 → 数字1             | ← phase_2.rsp
-+-------------------------------+
-低地址
-```
-
-### 您的问题解析
-> "我们应该输入的6个数字所在的位置就分别是：`R[%rsp]` `R[%rsp+0x8]` `%rsi` `%rsi+0x4` `%rsi+0x8` `%rsi+0xc`，此处说的是read_six_number的堆栈"
-
-这里的表述需要修正：
-- ❌ `R[%rsp]` 在 read 中指向**临时存储的地址值**（非数字本身）
-- ❌ `%si` 等是**地址**而非数字存储位置
-
-正确表述应为：
 **在 `read_six_numbers` 中**：
 | 表达式 | 内容 | 物理指向 |
 |--------|------|----------|
@@ -433,39 +357,133 @@ phase_2 栈帧：
 | `(%rsp)` | 地址5 | `phase_2.rsp + 16` |
 | `8(%rsp)` | 地址6 | `phase_2.rsp + 20` |
 
-> "返回phase_2函数后，利用栈顶指针调用就是：`%rsp` `%rsp+0x4` `%rsp+0x8` `%rsp+0xc` `%rsp+0x10` `%rsp+0x14`"
+返回phase_2函数后，利用栈顶指针调用就是：`%rsp` `%rsp+0x4` `%rsp+0x8` `%rsp+0xc` `%rsp+0x10` `%rsp+0x14`
 
-**完全正确**：
-- `(%rsp)` → 数字1（存储在 `phase_2.rsp + 0`）
-- `4(%rsp)` → 数字2（存储在 `phase_2.rsp + 4`）
-- ...
-- `20(%rsp)` → 数字6（存储在 `phase_2.rsp + 20`）
+总结：两个函数不共用同一个栈帧（各自的rsp不同），但是read_six_numbers将数据写入了phase_2的栈帧（通过phase_2传递过来的rsp值，即rsi）。
 
-### 总结您的核心观点
-您最后的结论完全准确：
-> "因为 phase_2 的 rsp 和 read_six_number 中的 rsi 相等，所以 phase_2 中访问的 rsp 是 read_six_number 中 rsi 而非二者共用一个 rsp"
+#### step4 返回 phase_2 
 
-这是整个机制的精髓：
-1. **值传递**：`phase_2.rsp` 的值复制到 `read_six_numbers.rsi`
-2. **独立栈帧**：
-   - `read_six_numbers` 有自己的 `%rsp`（与其 `%rsi` 无关）
-   - 通过 `%rsi` 操作的是 `phase_2` 的栈空间
-3. **无缝访问**：
-   - `phase_2` 返回后直接用 `%rsp` 访问数字
-   - 因为数字存储在 `[rsp]` 到 `[rsp+20]`
+```asm
+0000000000400efc <phase_2>:
+  400efc:	55                   	push   %rbp         ; 被调用者保存
+  400efd:	53                   	push   %rbx         ；被调用者保存
+  400efe:	48 83 ec 28          	sub    $0x28,%rsp   ; 分配40字节栈空间
+  400f02:	48 89 e6             	mov    %rsp,%rsi    ; rsi = rsp (栈顶地址作为参数)
+  400f05:	e8 52 05 00 00       	callq  40145c <read_six_numbers>    ; 调用read_six_numbers，读取6个数到栈上
+  400f0a:	83 3c 24 01          	cmpl   $0x1,(%rsp)              ; 比较栈顶第一个数是否等于1
+  400f0e:	74 20                	je     400f30 <phase_2+0x34>    ; 如果等于1，跳转到400f30
+  400f10:	e8 25 05 00 00       	callq  40143a <explode_bomb>    ; 否则爆炸
+  400f15:	eb 19                	jmp    400f30 <phase_2+0x34>    ; 跳转（冗余，因为爆炸后不会继续）
+  ; 循环部分
+  400f17:	8b 43 fc             	mov    -0x4(%rbx),%eax          ; 取前一个数（rbx-4）到eax
+  400f1a:	01 c0                	add    %eax,%eax                ; eax = eax * 2
+  400f1c:	39 03                	cmp    %eax,(%rbx)              ; 比较当前数(rbx指向)是否等于前一个数的两倍        
+  400f1e:	74 05                	je     400f25 <phase_2+0x29>    ; 相等则跳转
+  400f20:	e8 15 05 00 00       	callq  40143a <explode_bomb>    ; 否则爆炸
+  400f25:	48 83 c3 04          	add    $0x4,%rbx                ; rbx + 4 指向下一个数
+  400f29:	48 39 eb             	cmp    %rbp,%rbx                ; 比较rbx是否达到rbp（结束位置）
+  400f2c:	75 e9                	jne    400f17 <phase_2+0x1b>    ; 未达到则继续循环
+  400f2e:	eb 0c                	jmp    400f3c <phase_2+0x40>    ; 达到则跳出循环，函数结束
+  ; 初始化循环指针
+  400f30:	48 8d 5c 24 04       	lea    0x4(%rsp),%rbx           ; rbx指向第二个数（地址为rsp+4）
+  400f35:	48 8d 6c 24 18       	lea    0x18(%rsp),%rbp          ; rbp指向结束位置（rsp+24，即第六个数之后）
+  400f3a:	eb db                	jmp    400f17 <phase_2+0x1b>    ; 跳转到循环开始
+  ; 清理栈并返回
+  400f3c:	48 83 c4 28          	add    $0x28,%rsp
+  400f40:	5b                   	pop    %rbx
+  400f41:	5d                   	pop    %rbp
+  400f42:	c3                   	retq
+```
 
-### 技术类比
-想象两个办公室：
-- `phase_2` 办公室（主办公室） 
-- `read_six_numbers` 办公室（临时办公室）
+- 第7，8，9行，比较(%rsp)与1是否相等，不相等则引爆。可知第一个数为 1
+- 查看初始化循环指针部分（20行）。
+  - 第20行：第2个数存在`0x4(%rsp)`中，设为`num_2`，则初始化后`(%rbx)=num_2`；
+  - 第21行：将`rbp`指向结束位置（`rsp+24`，即第六个数之后）
+- 进入循环
+  - 第11、12行：取前一个数（`rbx-4`）到`eax`，将`eax`翻倍
+  - 第 13 行：**比较当前数(`rbx`指向)是否等于前一个数的两倍**
+  - 第 14、15 行：相等则继续循环，不相等则爆炸
+  - 剩余：继续取下一个值，并和结束位置`rbp`进行比较，未达到则继续循环
 
-过程：
-1. `phase_2` 把**自己文件柜的钥匙**（`%rsp`值）复制给 `read_six_numbers`（存入 `%rsi`）
-2. `read_six_numbers` 用这把钥匙打开 `phase_2` 的文件柜存入数据
-3. `read_six_numbers` 返还钥匙后
-4. `phase_2` 直接用原始钥匙（`%rsp`）打开文件柜访问数据
 
-这完美解释了为何：
-- 两个函数有各自的栈（独立办公室）
-- 却能操作同一块内存（同一个文件柜）
-- 参数传递通过值复制（钥匙复制）实现
+
+### phase_3
+
+#### 源代码
+
+```asm
+0000000000400f43 <phase_3>:
+  ; ===== 函数初始化 =====
+  400f43:	48 83 ec 18          	sub    $0x18,%rsp           ; 分配 24字节栈空间
+  400f47:	48 8d 4c 24 0c       	lea    0xc(%rsp),%rcx       ; rcx = rsp+0xc（第二个整数的存储地址）
+  400f4c:	48 8d 54 24 08       	lea    0x8(%rsp),%rdx       ; rdx = rsp+0x8（第一个整数的存储地址）
+  400f51:	be cf 25 40 00       	mov    $0x4025cf,%esi       ; esi = 格式字符串地址（通过 GDB 可查为 "%d %d"）
+  400f56:	b8 00 00 00 00       	mov    $0x0,%eax            ; eax = 0（清空返回值）
+  400f5b:	e8 90 fc ff ff       	callq  400bf0 <__isoc99_sscanf@plt> ; 调用 sscanf 读取输入
+  ; ===== 输入验证 =====
+  400f60:	83 f8 01             	cmp    $0x1,%eax                    ; 比较 sscanf 返回值（成功读取的参数数量）
+  400f63:	7f 05                	jg     400f6a <phase_3+0x27>        ; 若返回值 > 1（即成功读取两个整数），跳转
+  400f65:	e8 d0 04 00 00       	callq  40143a <explode_bomb>        ; 否则引爆炸弹（输入不足两个整数）
+  ; ===== 分支索引检查 =====
+  ; 索引 0 分支
+  400f6a:	83 7c 24 08 07       	cmpl   $0x7,0x8(%rsp)         ; 比较第一个整数和 7
+  400f6f:	77 3c                	ja     400fad <phase_3+0x6a>  ; 若第一个整数 > 7（无符号），跳转至炸弹
+  400f71:	8b 44 24 08          	mov    0x8(%rsp),%eax         ; eax = 第一个整数（分支索引）
+  400f75:	ff 24 c5 70 24 40 00 	jmpq   *0x402470(,%rax,8)     ; 跳转到 [0x402470 + rax*8] 地址处
+  ; ===== 分支表（根据索引跳转至此）=====
+  ; 索引 0 分支
+  400f7c:	b8 cf 00 00 00       	mov    $0xcf,%eax             ; eax = 0xCF (207)
+  400f81:	eb 3b                	jmp    400fbe <phase_3+0x7b>  ; 跳转到公共比较代码
+  ; 索引 2 分支
+  400f83:	b8 c3 02 00 00       	mov    $0x2c3,%eax            ; eax = 0x2C3 (707)
+  400f88:	eb 34                	jmp    400fbe <phase_3+0x7b>  
+  ; 索引 3 分支
+  400f8a:	b8 00 01 00 00       	mov    $0x100,%eax            ; eax = 0x100 (256)
+  400f8f:	eb 2d                	jmp    400fbe <phase_3+0x7b>  
+  ; 索引 4 分支
+  400f91:	b8 85 01 00 00       	mov    $0x185,%eax            ; eax = 0x185 (389)
+  400f96:	eb 26                	jmp    400fbe <phase_3+0x7b>  
+  ; 索引 5 分支
+  400f98:	b8 ce 00 00 00       	mov    $0xce,%eax             ; eax = 0xCE (206)
+  400f9d:	eb 1f                	jmp    400fbe <phase_3+0x7b> 
+  ; 索引 6 分支
+  400f9f:	b8 aa 02 00 00       	mov    $0x2aa,%eax            ; eax = 0x2AA (682)
+  400fa4:	eb 18                	jmp    400fbe <phase_3+0x7b>  
+  ; 索引 7 分支
+  400fa6:	b8 47 01 00 00       	mov    $0x147,%eax            ; eax = 0x147 (327)
+  400fab:	eb 11                	jmp    400fbe <phase_3+0x7b>  
+  ; 非法索引处理
+  400fad:	e8 88 04 00 00       	callq  40143a <explode_bomb>  ; 引爆炸弹（索引 > 7）
+  400fb2:	b8 00 00 00 00       	mov    $0x0,%eax              ；eax = 0
+  400fb7:	eb 05                	jmp    400fbe <phase_3+0x7b>  ；无条件跳转值 400fbe
+  ; ===== 索引 1 分支（特殊位置）=====
+  400fb9:	b8 37 01 00 00       	mov    $0x137,%eax            ; eax = 0x137 (311)
+  ; ===== 公共比较代码 =====
+  400fbe:	3b 44 24 0c          	cmp    0xc(%rsp),%eax         ; 比较 eax 和第二个输入整数
+  400fc2:	74 05                	je     400fc9 <phase_3+0x86>  ; 若相等，跳转至安全退出
+  400fc4:	e8 71 04 00 00       	callq  40143a <explode_bomb>  ; 否则引爆炸弹
+  ; ===== 安全退出 =====
+  400fc9:	48 83 c4 18          	add    $0x18,%rsp             ; 恢复栈指针
+  400fcd:	c3                   	retq                          ; 函数返回
+```
+
+## 问答
+
+Q1: 汇编中如何区分`$0x...` 是立即数还是地址
+
+A: 所有 $0x... 都是立即数，这是 AT&T 汇编语法规则。语法上都是立即数，但通过寄存器用途、地址范围、调试器可推断其语义（数值/地址）。
+
+Q2：`__isoc99_sscanf` 函数详解
+
+1. 函数功能： `__isoc99_sscanf` 是 C 标准库函数 sscanf 的特定实现，用于从字符串中格式化读取输入，按照指定格式解析输入字符串，将结果存储到指定变量；返回值为成功解析的参数数量（整数）
+  ```c
+  int sscanf(const char *str, const char *format, ...);
+  ```
+2. 参数传递机制（System V AMD64 ABI）/ 寄存器使用规则：
+   
+| 参数顺序 | 寄存器  | 当前值                     |
+|----------|---------|----------------------------|
+| 参数1    | `rdi`   | 输入字符串地址（外部传入）|
+| 参数2    | `rsi`   | `0x4025cf`（格式字符串）  |
+| 参数3    | `rdx`   | `rsp+8`（第一个整数地址） |
+| 参数4    | `rcx`   | `rsp+0xc`（第二个整数地址）|
