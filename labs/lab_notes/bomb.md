@@ -214,7 +214,7 @@ layout regs
   400efb:	c3                   	retq   
 ```
 
-注意此处需要结合 x86-64 寄存器，明确每个寄存器的作用
+注意此处需要结合 x86-64 寄存器，**明确每个寄存器的作用**
 
 - 第2行，为函数分配栈帧（`%rsp`为栈指针）
 - 第3行，设置函数`strings_not_equal`传入参数,（`%esi`为栈指针）函数第二个参数
@@ -223,7 +223,7 @@ layout regs
 - 第7行，调用`explode_bomb`函数，从字面意思理解，炸弹爆炸了。
 - 第8行，清理栈空间
 
-调试步骤:
+**调试步骤:**
 
 ```bash
 gdb run 
@@ -234,7 +234,7 @@ x/s 0x402400  # 正确答案
 quit
 ```
 
-重新启动
+**重新启动**
 
 ```bash
 gdb
@@ -302,7 +302,7 @@ c
   400f05:	e8 52 05 00 00       	callq  40145c <read_six_numbers>
 ```
 - 第 5 行：将栈顶指针`%rsp`传递给`%rsi`
-- 第 6 行：将`%rsi`作为参数调用`read_six_number`
+- 第 6 行：**将`%rsi`作为参数调用`read_six_number`**
 - 从字面意思理解，本题是要我们输入`6`个数字。这里`mov %rsp,%rsi`的目的是保存`caller`中栈顶的位置，方便在`read_six_numbers`中进行改值。我们不妨反汇编`read_six_numbers`
 
 此时栈的情况为
@@ -359,7 +359,7 @@ End of assembler dump.
 
 返回phase_2函数后，利用栈顶指针调用就是：`%rsp` `%rsp+0x4` `%rsp+0x8` `%rsp+0xc` `%rsp+0x10` `%rsp+0x14`
 
-总结：两个函数不共用同一个栈帧（各自的rsp不同），但是read_six_numbers将数据写入了phase_2的栈帧（通过phase_2传递过来的rsp值，即rsi）。
+**总结：** 两个函数不共用同一个栈帧（各自的rsp不同），但是read_six_numbers将数据写入了phase_2的栈帧（通过phase_2传递过来的rsp值，即rsi）。
 
 #### step4 返回 phase_2 
 
@@ -825,8 +825,6 @@ check_loop:
 6. 验证新链表是否按值降序排列
    - 如果链表不是从大到小排列 → 爆炸。
    - 满足条件则通过。
-
-
 
 
 ## 问答
