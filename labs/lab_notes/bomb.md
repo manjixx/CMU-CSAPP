@@ -852,6 +852,91 @@ node3 -> node4 -> node5 -> node6 -> node1 -> node2
 
 ### phase_7
 
+#### 触发条件
+
+通过分析 phase_defused 方法可以发现，在通过 phase_6 之后，满足一定条件之后可以会触发隐藏关卡
+
+```asm
+00000000004015c4 <phase_defused>:
+  4015c4:	48 83 ec 78          	sub    $0x78,%rsp                 # 为当前函数分配 0x78 (120) 字节的栈空间
+  4015c8:	64 48 8b 04 25 28 00 	mov    %fs:0x28,%rax              # 保存栈保护 canary 值（防止栈溢出攻击）
+  4015cf:	00 00 
+  4015d1:	48 89 44 24 68       	mov    %rax,0x68(%rsp)
+  4015d6:	31 c0                	xor    %eax,%eax                  # 将寄存器 %eax 清零
+  # 比较全局变量 num_input_strings（记录输入的行数）是否等于 6
+
+  4015d8:	83 3d 81 21 20 00 06 	cmpl   $0x6,0x202181(%rip)        # 603760 <num_input_strings>
+  4015df:	75 5e                	jne    40163f <phase_defused+0x7b> # 如果 num_input_strings != 6，则跳转到 40163f，直接打印普通通关信息，不触发隐藏关卡。
+  # 准备三个变量的地址作为 sscanf 参数：
+  4015e1:	4c 8d 44 24 10       	lea    0x10(%rsp),%r8             #  第一个整数存放在 [rsp+8]
+  4015e6:	48 8d 4c 24 0c       	lea    0xc(%rsp),%rcx             #  第二个整数存放在 [rsp+0xc]
+  4015eb:	48 8d 54 24 08       	lea    0x8(%rsp),%rdx             #  第一个字符串存放在 [rsp+0x10]
+  4015f0:	be 19 26 40 00       	mov    $0x402619,%esi             #  将格式化字符串地址 0x402619 存入 %esi，即传递给 sscanf 的格式串,通常内容为 "%d %d %s"
+  4015f5:	bf 70 38 60 00       	mov    $0x603870,%edi             #  edi = 0x603870：这是存放我们上一次输入字符串的全局地址，也就是 phase_6 的输入内容。
+  4015fa:	e8 f1 f5 ff ff       	callq  400bf0 <__isoc99_sscanf@plt> # 调用 sscanf(0x603870, "%d %d %s", &x, &y, str)，解析最后一次输入的三个内容。其中 %eax 返回成功解析的字段数量
+  4015ff:	83 f8 03             	cmp    $0x3,%eax                    # 判断 sscanf 是否成功读取到三个参数（即两个数字 + 一个字符串）
+  401602:	75 31                	jne    401635 <phase_defused+0x71>  # 如果不是三个参数（即 %eax != 3），直接跳过隐藏关卡
+  401604:	be 22 26 40 00       	mov    $0x402622,%esi               # %esi = 0x402622，这个地址存放了一个固定字符串（例如 "DrEvil"）。
+  401609:	48 8d 7c 24 10       	lea    0x10(%rsp),%rdi              # %rdi = 我们输入的第三个字符串（即 sscanf 解析的 %s）
+  40160e:	e8 25 fd ff ff       	callq  401338 <strings_not_equal>   # 调用 strings_not_equal(user_input_string, "DrEvil")
+  401613:	85 c0                	test   %eax,%eax                    
+  401615:	75 1e                	jne    401635 <phase_defused+0x71>  # 如果字符串不相等（eax != 0），则跳转，不触发隐藏关卡。
+  # 打印两行提示语（例如：“Curses, you’ve found the secret phase!”）
+  401617:	bf f8 24 40 00       	mov    $0x4024f8,%edi
+  40161c:	e8 ef f4 ff ff       	callq  400b10 <puts@plt>
+  401621:	bf 20 25 40 00       	mov    $0x402520,%edi
+  401626:	e8 e5 f4 ff ff       	callq  400b10 <puts@plt>
+  40162b:	b8 00 00 00 00       	mov    $0x0,%eax
+  # 调用隐藏关卡函数 secret_phase()
+  401630:	e8 0d fc ff ff       	callq  401242 <secret_phase>
+  # 打印普通的“Congratulations, you've defused the bomb!”字样。
+  401635:	bf 58 25 40 00       	mov    $0x402558,%edi
+  40163a:	e8 d1 f4 ff ff       	callq  400b10 <puts@plt>
+  # 栈保护检查，确保没有被篡改。
+  40163f:	48 8b 44 24 68       	mov    0x68(%rsp),%rax
+  401644:	64 48 33 04 25 28 00 	xor    %fs:0x28,%rax
+  40164b:	00 00 
+  40164d:	74 05                	je     401654 <phase_defused+0x90>
+  40164f:	e8 dc f4 ff ff       	callq  400b30 <__stack_chk_fail@plt>
+  # 函数返回，清理栈空间。
+  401654:	48 83 c4 78          	add    $0x78,%rsp
+  401658:	c3                   	retq   
+  401659:	90                   	nop
+  40165a:	90                   	nop
+  40165b:	90                   	nop
+  40165c:	90                   	nop
+  40165d:	90                   	nop
+  40165e:	90                   	nop
+  40165f:	90                   	nop
+```
+
+打印关键信息可以得到
+```sh
+(gdb) set $i = 0
+(gdb) while $i < num_input_strings
+> printf "input_strings[%d] @ %p: ", $i, 0x603780 + $i * 80
+> x/s 0x603780 + $i * 80
+> set $i = $i + 1
+> end
+
+input_strings[0] @ 0x603780: 0x603780 <input_strings>:  "Border relations with Canada have never been better."
+input_strings[1] @ 0x6037d0: 0x6037d0 <input_strings+80>:       "1 2 4 8 16 32"
+input_strings[2] @ 0x603820: 0x603820 <input_strings+160>:      "0 207"
+input_strings[3] @ 0x603870: 0x603870 <input_strings+240>:      "0 0"
+input_strings[4] @ 0x6038c0: 0x6038c0 <input_strings+320>:      "9ONEFG"
+input_strings[5] @ 0x603910: 0x603910 <input_strings+400>:      "4 3 2 1 6 5"
+
+(gdb) x/s (char*)0x402622
+0x402622:       "DrEvil"
+```
+
+即如果第四阶段输入为则会触发 `secret_phase`，进而触发 `fun_7`。关于`secret_phase`将在后边进行解释：
+```sh
+0 0 DrEvil
+```
+
+#### secret_phase
+
 ## 问答
 
 ### Q1: 汇编中如何区分 `$0x...` 是立即数还是地址
