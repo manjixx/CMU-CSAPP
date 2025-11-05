@@ -9,6 +9,7 @@
 ### 1.1 优化的重要性与多层级特性
 
 **性能影响因素**
+
 - **算法复杂度（大O表示法）**：决定渐进行为
 - **常数因子**：决定实际运行速度，可差10倍以上
 
@@ -413,7 +414,6 @@ sum = temp;          // 最终写回内存
 
 **指令级并行性（ILP）** 是指处理器能够在**同一时刻并行执行多条指令**的能力。充分利用 ILP 可以显著提升程序性能。
 
-
 **本章思路**
 
 ```txt
@@ -431,30 +431,85 @@ SIMD向量化 - 硬件极致 (4.3.5)
 ### 4.1 基准测试：向量归约
 
 #### 实验说明
-- **基准测试设计**：定义向量数据结构`vec`，包含长度和数据指针
-- **测试函数**：`combined`函数计算向量元素的和或乘积
+
+**基准测试设计**：定义向量数据结构`vec`，包含长度和数据指针
+
+```c
+/* data structure for vectors */
+typedef struct{
+    size_t len;
+    data_t *data;
+} vec;
+
+/* retrieve vector element and store at val */
+int get_vec_element(*vec v, size_t idx, data_t *val){
+    if (idx >= v ->len )
+        return 0;
+    *val = v -> data[idx];
+    return 1;
+}
+```
+
+- 数据类型：将 data_t 声明为不同类型：
+  - int
+  - long
+  - float
+  - double
+
+**测试函数**
+
+- `combine1`函数计算向量元素的和或乘积
+
+```c
+void combine1(vec_ptr v, data_t *dest){
+    long int i;
+    *dest = IDENT;
+    for (i = 0; i < vec_length(v); i++){
+        data_t val;
+        get_vec_element(v, i, &val);
+        *dest = *dest OP val
+    }
+}
+```
+
 - **变量控制**：
   - 数据类型：`int`、`long`、`float`、`double`
   - 操作类型：加法(`+`/`0`)和乘法(`*`/`1`)
 
 #### 性能测量方法
-- **CPE指标**：每个元素周期数，表示每个操作所需的平均时钟周期数
+
+- **CPE(cycles per element)指标**：每个元素周期数，表示每个操作所需的平均时钟周期数。用来衡量在`vectors` 或 `list` 上运算的程序性能指标
 - **计算公式**：`T = CPE × n + Overhead`
 - **测量原理**：通过不同向量长度下的运行时间，计算CPE作为拟合直线斜率
 
-#### 实验结果对比
+#### 实验结果
+
+- 未优化的 `Combine1`
+- `Combine1 -O1`
+- 基础优化 `combine4`
+  - **代码移动**：将`vec_length`调用移出循环
+  - **消除边界检查**：直接访问向量数据，避免每次迭代检查
+  - **临时变量累积**：使用局部变量`t`累积结果，减少内存访问
+
+```c
+void combine4(vec_ptr v, data_t *dest){
+    long i;
+    long length = vec_length(v);
+    data_t *d = get_vec_start(v);
+    data_t t = IDENT;
+    for(i = 0; i < length; i++){
+        t = t OP d[i];
+    }
+    *dest = t;
+}
+```
+
 | 方法 | 整数加法 | 整数乘法 | 双精度FP加法 | 双精度FP乘法 |
 |------|----------|----------|--------------|--------------|
 | 未优化组合 | 22.68 | 20.02 | 19.98 | 20.18 |
-| 组合-O1 | 10.12 | 10.12 | 10.17 | 11.14 |
+| Combine1 -O1 | 10.12 | 10.12 | 10.17 | 11.14 |
 | Combine4 | 1.27 | 3.01 | 3.01 | 5.01 |
 
-#### 关键优化技术
-- **代码移动**：将`vec_length`调用移出循环
-- **消除边界检查**：直接访问向量数据，避免每次迭代检查
-- **临时变量累积**：使用局部变量`t`累积结果，减少内存访问
-
-#### 性能分析
 - **Combine4优化效果**：相比-O1版本，性能提升8-10倍
 - **延迟界限逼近**：优化后CPE接近各操作的固有延迟
 - **开销消除**：主要消除了过程调用和内存访问的开销
