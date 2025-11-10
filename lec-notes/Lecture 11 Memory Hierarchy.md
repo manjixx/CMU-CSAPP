@@ -72,7 +72,7 @@
 - **定义**：总线是一组并行导线（parallel wires）的集合，用来传输地址、数据和控制信号
 - **总线特征**：总线通常由多个设备共享
 
-![alt text](image-6.png)
+![alt text](pic/traditional-bus-architecture.png)
 
 **内存读事务流程**
 1. CPU将地址A放到内存总线
@@ -92,14 +92,14 @@
 - 每个表面由一组**同心圆环**组成，称为**磁道**
 - 每个磁道被划分为若干个**扇区**，扇区之间有**间隙区**用于同步和分隔
 
-![alt text](image-8.png)
+![alt text](pic/disk-platter-structure.png)
 
 **多盘片视图**
 - 多个盘片中相同编号的磁道彼此垂直对齐
 - 这些对齐的磁道共同组成一个**柱面**
 - 当磁头组同时定位在相同半径的磁道上时，它们便位于同一个柱面中
 
-![alt text](image-9.png)
+![alt text](pic/disk-cylinder-view.png)
 
 ```
 磁盘（Disk）
@@ -129,7 +129,7 @@
 - 不同记录区的每轨扇区数不同——外层记录区的每轨扇区数多于内层记录区
 - 计算磁盘总容量时使用**每轨平均扇区数**
 
-![alt text](image-10.png)
+![alt text](pic/disk-recording-zones.png)
 
 **计算磁盘容量**
 - **公式**
@@ -162,7 +162,7 @@ $$
 - 读写磁头在磁盘表面上方通过**一层极薄的气垫**漂浮
 - **主轴**驱动盘片旋转
 
-![alt text](image-11.png)
+![alt text](pic/disk-single-platter-view.png)
 
 **多碟视图**
 - 现代硬盘通常有多个盘片，上下叠放
@@ -208,7 +208,7 @@ $$
 - CPU通过I/O桥连接各种设备
 - 包括USB控制器、图形适配器、磁盘控制器等
 
-![alt text](image-12.png)
+![alt text](pic/io-bus-architecture.png)
 
 **读取磁盘扇区的三个阶段**
 
@@ -281,7 +281,7 @@ $$
 - SSD 内部有**闪存转换层**，负责将**逻辑块地址**映射到实际的**物理页**
 - 读写命令通过 **I/O 总线**传输至 SSD 控制器
 
-![alt text](image-13.png)
+![alt text](pic/ssd-architecture.png)
 
 **SSD 性能特征**
 - **顺序访问**比随机访问更快
@@ -310,7 +310,7 @@ $$
 
 ### 1.9 存储趋势与CPU-内存差距
 
-![alt text](image-14.png)
+![alt text](pic/memory-performance-gap-trend.png)
 
 **性能差距扩大**
 - CPU速度增长远快于内存和磁盘
@@ -414,7 +414,7 @@ int sum_array_3d(int a[M][N][N]) {
 
 ### 3.2 内存层次结构示例
 
-![alt text](image-15.png)
+![alt text](pic/memory-hierarchy-overview.png)
 
 **典型层次**
 1. L0 CPU 寄存器：保存当前运算所需的立即数据
@@ -451,7 +451,7 @@ CPU寄存器 → L1 Cache → L2 Cache → L3 Cache → DRAM → SSD/HDD → Rem
 - **内存**：较大、较慢、较便宜的存储器，划分为"块"
 - 数据以块大小传输单位复制
 
-![alt text](image-16.png)
+![alt text](pic/cache-hit-miss-illustration.png)
 
 **缓存命中**
 - 请求的数据块在缓存中
@@ -503,16 +503,16 @@ CPU寄存器 → L1 Cache → L2 Cache → L3 Cache → DRAM → SSD/HDD → Rem
 
 1. **行访问选通 (RAS, Row Access Strobe)**
    * 选择行 2，将整行数据从 DRAM 阵列复制到 **内部行缓冲区 (Internal Row Buffer)**。
-    ![alt text](image-17.png)
+    ![alt text](pic/dram-row-access.png)
 
 2. **列访问选通 (CAS, Column Access Strobe)**
    * 选择列 1，将超单元 (2,1) 从行缓冲区传送到数据线，并返回 CPU。
-   ![alt text](image-18.png)
+   ![alt text](pic/dram-column-access.png)
 
 
 **DRAM 模块**：
 
-![alt text](image-19.png)
+![alt text](pic/dram-module-organization.png)
 * 64 MB 内存模块由 8 个 8M×8 DRAM 芯片组成，每个芯片对应内存地址的一部分。
 * 64 位主存访问可以从多个芯片并行读取数据，每个芯片提供 8 位。
 

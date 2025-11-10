@@ -524,7 +524,7 @@ void combine4(vec_ptr v, data_t *dest){
 
 #### 现代处理器架构
 
-![alt text](image.png)
+![alt text](pic/cpu-superscalar-architecture.png)
 
 - 上半部分：获取指令的方法。包含高性能本地缓存，然后缓存将指令送入指令译码这个硬件中（实现指令拆分为低级操作，并确定操作间的依赖关系）
 
@@ -553,7 +553,7 @@ long mult_eg(long a, long b, long c) {
 }
 ```
 
-![alt text](image-1.png)
+![alt text](pic/pipeline-stage-example.png)
 
 流水线有点像并行性，但这种并行性并不意味着有多个硬件资源，而是在单个硬件上的操作，划分为紧密联系的顺序的多个步骤。
 
@@ -646,7 +646,7 @@ x = x OP (d[i] OP d[i+1]);  // 对比之前的 (x OP d[i]) OP d[i+1]
 **打破依赖的原理**：实际上括号的移位改变了计算方式，允许`d[i] OP d[i+1]`与累积操作并行执行，创建了独立的计算路径。现在计算关键路径如图所示：
 
 
-![alt text](image-2.png)
+![alt text](pic/reassociation-dependency-graph.png)
 
 **实验结果 - 重新关联带来显著提升**
 | 方法 | 整数加法 | 整数乘法 | 双精度FP加法 | 双精度FP乘法 |
@@ -690,7 +690,7 @@ void unroll2a_combine(vec_ptr v, data_t *dest){
 
 ```
 
-![alt text](image-3.png)
+-  ![alt text](pic/dual-accumulator-unroll.png)
 
 **实验结果 - 多累积变量进一步优化**
 | 方法 | 整数加法 | 整数乘法 | 双精度FP加法 | 双精度FP乘法 |
@@ -706,9 +706,9 @@ void unroll2a_combine(vec_ptr v, data_t *dest){
 **参数优化方法**
 - **展开因子L** vs **累积变量数K**的协同调优
 - 双精度乘法优化结果：Intel Haswell CPU，双精度浮点数乘法，延迟界限5.0，吞吐量界限0.5
-  ![alt text](image-4.png)
+-  ![alt text](pic/double-precision-unroll-tradeoff.png)
 - 整数加法优化结果：Intel Haswell CPU，双精度浮点数乘法，延迟界限1.0，吞吐量界限0.5
-  ![alt text](image-5.png)
+-  ![alt text](pic/integer-unroll-tradeoff.png)
 
 
 **最终标量性能成果**
