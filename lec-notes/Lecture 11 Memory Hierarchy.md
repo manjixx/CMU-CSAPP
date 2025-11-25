@@ -602,7 +602,7 @@ CPU寄存器 → L1 Cache(大约4个时钟周期) → L2 Cache（大约10个时�
 
 每一层都缓存下一层的一个子集。
 
-![alt text](image.png)
+![alt text](pic/cache-hierarchy-position.png)
 
 
 ---
@@ -618,7 +618,7 @@ CPU寄存器 → L1 Cache(大约4个时钟周期) → L2 Cache（大约10个时�
   * **有效位**（valid bit）指明改行是否包含有意义的信息
   * **标记位**（tag bit）$ t = m - (b + s) 是当**前块的内存地址**的位的一个子集，唯一标识存储在这个高速缓存行中的块。
 
-![alt text](image-1.png)
+![alt text](pic/cache-general-organization.png)
 
 因此高速缓存的结构可以用元组 $(S,E,B,m)$ 来描述。其大小为 $ C = S * E * B $
 
@@ -637,7 +637,7 @@ CPU寄存器 → L1 Cache(大约4个时钟周期) → L2 Cache（大约10个时�
 - 标记位（t 位）：指示当前字存储在这个组中的哪一行。当且仅当该行中标记位与地址A中的标记位匹配，且设置了有效位，该组的这一行中才包含该字
 - 偏移位（b bits）：当前字在数据块B中的字偏移
 
-![alt text](image-2.png)
+![alt text](pic/cache-address-fields.png)
 
 
 ---
@@ -647,15 +647,15 @@ CPU寄存器 → L1 Cache(大约4个时钟周期) → L2 Cache（大约10个时�
 **基本概念**
 每个内存地址通过其 s bits 只能映射到唯一的一个 set，而每个 set 中仅包含一条缓存行。
 
-![alt text](image-3.png)
+![alt text](pic/cache-direct-mapped-overview.png)
 
 **组选择**
 
-![alt text](image-4.png)
+![alt text](pic/cache-direct-mapped-set-selection.png)
 
 **行匹配与字选择**
 
-![alt text](image-5.png)
+![alt text](pic/cache-direct-mapped-line-matching.png)
 
 **不命中时行替换**：用新取出的行替换当前行
 
@@ -726,13 +726,13 @@ float dotdrop(float x[8], float y[8]){
 
 E = 2 的组相联缓存
 
-![alt text](image-6.png)
+![alt text](pic/cache-set-associative-overview.png)
 
 ****
 
 #### 组选择
 
-![alt text](image-7.png)
+![alt text](pic/cache-set-associative-set-selection.png)
 
 ****
 
@@ -740,7 +740,7 @@ E = 2 的组相联缓存
 
 高速缓存必须搜索每一行，寻找一个有效行，其标记与地址中的标记相匹配
 
-![alt text](image-8.png)
+![alt text](pic/cache-set-associative-line-matching.png)
 
 
 #### 替换策略
@@ -754,17 +754,17 @@ E = 2 的组相联缓存
 
 ### 4.5 全相联缓存（Fully Associative） E = 所有行
 
-![alt text](image-9.png)
+![alt text](pic/cache-fully-associative-overview.png)
 
 #### 组选择
 
 全相联高速缓存中的只有一个组，地址中每组索引为，地址被划分为一个标记和一个块偏移
 
-![alt text](image-10.png)
+![alt text](pic/cache-fully-associative-set-selection.png)
 
 #### 行匹配和字选择
 
-![alt text](image-11.png)
+![alt text](pic/cache-fully-associative-line-matching.png)
 
 * 缓存中任意位置都可以放置任意块
 * 冲突最少
@@ -808,7 +808,10 @@ E = 2 的组相联缓存
 
 ### 4.7 现代处理器缓存（以 Intel Core i7 为例）
 
-![alt text](image-12.png)
+![alt text](pic/cache-intel-core-i7.png)
+
+Intel 的三级缓存体现了典型设计理念：
+L1 小而快 → L2 较大较慢 → L3 更大更慢、共享。
 
 | 缓存级别         | 大小     | 相联度    | 延迟           |
 | ------------ | ------ | ------ | ------------ |
@@ -818,46 +821,140 @@ E = 2 的组相联缓存
 
 所有级别块大小均为 **64 bytes**。
 
-Intel 的三级缓存体现了典型设计理念：
-L1 小而快 → L2 较大较慢 → L3 更大更慢、共享。
+### 4.8 高速缓存参数的性能影响
+
+有许多指标来衡量高速缓存的性能：
+
+**1. Miss Rate（未命中率）**
+
+* **定义**：
+  内存访问中 **没有在 cache 中找到** 的比例
+  （即 *misses / total accesses*）
+
+* **关系**：
+
+  ```
+  Miss Rate = 1 - Hit Rate
+  ```
+
+* **典型数值**：
+
+  * **L1 Cache**：3% – 10%
+  * **L2 Cache**：可以非常小，例如 < 1%（取决于大小等参数）
+
+**2. Hit Time（命中时间）**
+
+* **定义**：
+  Cache 命中时，将一条 cache line **从 cache 传递给处理器**（CPU）所需时间。
+  包含判断该 line 是否在 cache 中的时间（即标签比较等硬件判定）。
+
+* **典型数值**：
+
+  * **L1**：约 4 个时钟周期
+  * **L2**：约 10 个时钟周期
+
+**3. Miss Penalty（未命中惩罚）**
+
+* **定义**：
+  Cache 未命中时，额外需要的访问时间（通常包括从下一层加载数据的延迟）。
+
+* **典型数值**：
+
+  * 访问主存（DRAM）：通常 50–200 个周期
+  * 访问 L2 的处罚：通常为数 10 个周期
+  * 访问 L3 不命中的处罚：通常为 50 个周期
+
 
 ---
 
-## 5. 编写高速缓存优化的代码
+📌 **为什么 Miss Rate 如此关键？（思考这些数值）**
 
-缓存性能直接决定程序性能。
-主要两种优化方式：
+* **命中（hit）与未命中（miss）之间的差距巨大**：L1 命中 vs 访问主存（miss）：**差距可能达到 100 倍**
+（例如：L1 1 cycle，但主存 100+ cycles）
+
+* **为什么 99% hit 比 97% hit 快两倍？**
+  * 给定条件： 
+    * cache hit time = **1 cycle**
+    * miss penalty = **100 cycles**
+  * 计算平均访问时间（AMAT）：
+    * **▶ 97% 命中率（3% miss）**
+      ```
+      AMAT = (hit_time) + miss_rate * (miss_penalty)
+          = 1 + 0.03 * 100
+          = 1 + 3
+          = 4 cycles
+      ```
+    * **▶ 99% 命中率（1% miss）**
+
+      ```
+      AMAT = 1 + 0.01 * 100
+          = 1 + 1
+          = 2 cycles
+      ```
+    * **▶ 结果：**
+      * 99% 命中率 → **2 cycles**
+      * 97% 命中率 → **4 cycles**
+
+→ **99% 命中率的性能是 97% 命中率的两倍！**
 
 ---
 
-#### **（1）提升空间局部性**
+## 5. 编写高速缓存优化的代码 Writing Cache Friendly Code
 
-* 使程序按连续地址访问
-* 如：行优先访问二维数组
-* 典型手段：
+**让常见情况运行得更快**：关注核心函数里的循环
 
-  * 调整循环顺序（ijk → ikj）
-  * 降低 stride
+**尽量减少内层循环中的缓存未命中**：
 
----
+  * 对变量的重复引用是好的（时间局部性）
+  * 步长为 1 的引用模式是好的（空间局部性）
 
-#### **（2）提升时间局部性**
+**关键理念：** 我们对局部性的定性概念，通过我们对缓存内存的理解，被量化了。
 
-* 重复使用数据
-* 如：热点变量、多次遍历小数组
-
-典型优化：
-
-* Blocking（分块）矩阵乘法
-* 数据聚簇（data clustering）
-
----
+***
 
 ## 6. 高速缓存对程序性能的影响
 
-### 6.1 内存山（Memory Mountain）
+### 6.1 存储器山（Memory Mountain）
 
-展示缓存与 DRAM 在不同访问步长（stride）下的带宽变化。
+**读吞吐量（read throughtput）**: 一个程序从存储系统中读数据的速率，或者有时被称为读带宽（read bandwidth）。如果一个程序在 s 秒的时间段内读 n 个字节，那么这段时间的读吞吐量为 n/s，通常以兆字节每秒（MB/s）为单位。
+
+**测试函数**
+
+- 使用方法：对于许多不同的 elems 和 stride 组合：
+  - 调用一次 test() 来预热缓存
+  - 再次调用 test() 并测量读取吞吐量（MB/s）
+
+```c
+long data[MAXELEMS]; /* 要遍历的全局数组 */
+
+/* test - 使用 stride 为“stride”、遍历数组“data”中前
+ * “elems”个元素，使用 4x4 循环展开。
+ */
+int test(int elems, int stride) {
+    long i, sx2=stride*2, sx3=stride*3, sx4=stride*4;
+    long acc0 = 0, acc1 = 0, acc2 = 0, acc3 = 0;
+    long length = elems, limit = length - sx4;
+
+    /* 每次处理 4 个元素 */
+    for (i = 0; i < limit; i += sx4) {
+        acc0 = acc0 + data[i];
+        acc1 = acc1 + data[i+stride];
+        acc2 = acc2 + data[i+sx2];
+        acc3 = acc3 + data[i+sx3];
+    }
+
+    /* 完成剩余元素 */
+    for (; i < length; i++) {
+        acc0 = acc0 + data[i];
+    }
+
+    return ((acc0 + acc1) + (acc2 + acc3));
+}
+```
+
+**存储器山**：展示缓存与 DRAM 在不同访问步长（stride）下的带宽变化。
+
+![alt text](pic/memory-mountain.png)
 
 * 小 stride → 良好空间局部性 → 带宽高
 * 大 stride → 破坏局部性 → 缓存不命中 → 带宽低
@@ -869,39 +966,198 @@ L1 小而快 → L2 较大较慢 → L3 更大更慢、共享。
 
 ---
 
-### 6.2 矩阵乘法与缓存：循环重排
+### 6.2 重新排列循环以提高空间局部性
 
-不同循环顺序产生不同 stride，导致不同的缓存性能。
+#### 矩阵乘法问题：
 
-| 循环顺序      | Miss 数 | 局部性 |
-| --------- | ------ | --- |
-| kij / ikj | **最低** | 最佳  |
-| ijk       | 中等     | 中等  |
-| jki       | **最高** | 最差  |
+给定两个 n×n 矩阵 **A** 与 **B**，计算 **C = A·B**：
 
-**结论：**
-访问模式决定缓存行为，缓存行为决定性能。
+$$
+[
+C_{ij}=\sum_{k=1}^{n} A_{ik}B_{kj}
+]
+$$
+
+例如 n=2 时，展开为：
+
+
+$$ \begin{bmatrix}c_{11} & c_{12} \\c_{21} & c_{22} \end{bmatrix} = \begin{bmatrix} a_{11} b_{11} + a_{12} b_{21} & a_{11} b_{12} + a_{12} b_{22} \\a_{21} b_{11} + a_{22} b_{21} & a_{21}b_{12} + a_{22} b_{22}\end{bmatrix}
+$$
+
+
+
+#### 📌 代码 A~F：六种循环次序
+
+矩阵乘法“ijk”共有 3 重循环，6 种不同循环次序：
+
+
+
+* **版本 a：ijk 顺序**
+  * C 按行写入（很好），
+  * A 按行访问（很好），
+  * **B 按列访问（极差） → 导致高缓存未命中**。
+
+  ```c
+  for (i = 0; i < n; i++)
+      for (j = 0; j < n; j++) {
+          sum = 0.0;
+          for (k = 0; k < n; k++)
+              sum += A[i][k] * B[k][j];
+          C[i][j] = sum;
+      }
+  ```
+
+
+* **版本 b：ikj 顺序** → 整体比版本 a 好。
+
+  * A 仍然友好
+  * B 仍按行访问（好）
+  * **C 访问连续（好）**
+  ```c
+  for (i = 0; i < n; i++)
+      for (k = 0; k < n; k++)
+          for (j = 0; j < n; j++)
+              C[i][j] += A[i][k] * B[k][j];
+  ```
+
+- **版本 c：jik 顺序**：本质上是版本 a 的 i、j 对换，性能类似。
+
+  ```c
+  for (j = 0; j < n; j++)
+      for (i = 0; i < n; i++) {
+          sum = 0.0;
+          for (k = 0; k < n; k++)
+              sum += A[i][k] * B[k][j];
+          C[i][j] = sum;
+      }
+  ```
+* **版本 d：jki 顺序**
+  * 访问 C 的模式较差
+  * A 按列访问较差
+  ```c
+  for (j = 0; j < n; j++)
+      for (k = 0; k < n; k++)
+          for (i = 0; i < n; i++)
+              C[i][j] += A[i][k] * B[k][j];
+  ```
+
+* **版本 e：kij 顺序**
+  * A 按列访问不好
+  * C & B 访问很好
+  ```c
+  for (k = 0; k < n; k++)
+      for (i = 0; i < n; i++)
+          for (j = 0; j < n; j++)
+              C[i][j] += A[i][k] * B[k][j];
+  ```
+
+* **版本 f：kji 顺序**：特点较差（访问 A 和 C 的局部性都较弱）。
+
+  ```c
+  for (k = 0; k < n; k++)
+      for (j = 0; j < n; j++)
+          for (i = 0; i < n; i++)
+              C[i][j] += A[i][k] * B[k][j];
+  ```
+
+#### 📊 图与表格分析：6 种循环次序的缓存未命中率
+
+
+| 矩阵乘法版本 (类) | 每次迭代 |          |          |          |          |          |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| | 加载次数 | 存储次数 | A未命中次数 | B未命中次数 | C未命中次数 | 未命中总次数 |
+| ijk & jik (AB) | 2 | 0 | 0.25 | 1.00 | 0.00 | 1.25 |
+| jki & kji (AC) | 2 | 1 | 1.00 | 0.00 | 1.00 | 2.00 |
+| kij & ikj (BC) | 2 | 1 | 0.00 | 0.25 | 0.25 | 0.50 |
+
+关键原因：
+
+* 访问矩阵 A（行优先）友好时，未命中更少
+* 访问 B 按列时特别糟糕（因为 C 语言按行存储）
+
+![alt text](pic/matrix-multiplication-cache-miss-comparison.png)
 
 ---
 
-### 6.3 分块矩阵乘法（Blocking）
+### 6.3 循环分块（Blocking）进一步提高局部性
 
-通过分块（Tile）方式，使矩阵乘法的 A、B、C 三个矩阵的小块反复在缓存中使用。
+####  原始矩阵乘法
 
-效果：
+```c
+c = (double *) calloc(sizeof(double), n*n); 
+/* Multiply n x n matrices a and b */ 
+void mmm(double *a, double *b, double *c, int n) { 
+    int i, j, k; 
+    for (i = 0; i < n; i++) 
+        for (j = 0; j < n; j++) 
+            for (k = 0; k < n; k++) 
+                c[i*n + j] += a[i*n + k] * b[k*n + j]; 
+}
+```
 
-* 显著减少 DRAM 访问
+* **问题**：矩阵过大时，几乎每次访问都会产生 cache miss
+* Cache miss 复杂度：$ [\text{misses} = O(n^3)]$
+---
+
+####  分块矩阵乘法（Blocking）
+
+通过 **分块（Tile）** 方式，使矩阵乘法的 **A、B、C** 三个矩阵的小块可以在缓存中反复使用，从而显著提高缓存利用率。
+
+##### 核心思想
+
+* 将矩阵划分为 B × B 的小块（block / tile）
+* 外层循环控制 block 位置，内层循环在 block 内执行普通矩阵乘法
+* 保证三个 block 同时能放入 cache：$  [3 B^2 < C]$
+
+##### C 语言实现示例
+
+```c
+c = (double *) calloc(sizeof(double), n*n); 
+void mmm(double *a, double *b, double *c, int n) { 
+    int i, j, k, i1, j1, k1;
+    int B = block_size; // block size
+    for (i = 0; i < n; i += B)
+        for (j = 0; j < n; j += B)
+            for (k = 0; k < n; k += B)
+                for (i1 = i; i1 < i+B; i1++)
+                    for (j1 = j; j1 < j+B; j1++)
+                        for (k1 = k; k1 < k+B; k1++)
+                            c[i1*n + j1] += a[i1*n + k1] * b[k1*n + j1];
+}
+```
+
+##### Cache Miss 分析
+
+* 每次 block 迭代：$[\text{misses per block} \approx B^2 / 8]$
+* 总 miss：$[\text{misses} = \frac{n^3}{4B}]$
+
+![alt text](pic/matrix-multiplication-blocking.png)
+
+##### 效果
+
+* 显著减少 DRAM 访问次数
 * Miss 数从 O(n³) 降为 O(n³ / B)
+* 建议选择尽可能大的 B，但必须满足 3B² < C
+* 利用矩阵乘法的 **时间局部性（temporal locality）**，对大矩阵性能提升明显
 
-Blocking 是编译器、深度学习框架、BLAS 库的核心优化。
+### 6.4 在程序中利用局部性
 
----
+**时间局部性：最近访问的数据会被再次访问**
+  - 循环内反复使用的变量有高时间局部性
+  - 算法应尽量重复利用已经在 cache 中的数据
 
+**空间局部性：访问某位置 → 可能访问其邻近数据**
 
+  * 数组按行访问优于按列访问（C 为 row-major）
+  * 结构体布局应减少跨 cache line 访问
+
+**手段：**
+
+* 调整循环次序（如 ikj）
+* 使用分块算法（blocking）
+* 合理组织结构体与数组布局
 
 ## 补充技术细节
-
-
 
 ### 存储器成本与访问趋势
 
