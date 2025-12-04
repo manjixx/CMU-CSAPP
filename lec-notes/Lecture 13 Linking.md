@@ -57,7 +57,7 @@ int sum(int *a, int n){
 
 编译器驱动程序在**将源文件**转换为**可执行目标文件**的过程中，经历了以下几个关键步骤：
 
-![alt text](image.png)
+![alt text](pic/linking-compilation-steps.png)
 
 **预处理（C预处理器 (`cpp`)）**：处理源文件 `main.c` 中的宏定义、文件包含等指令，生成中间文件 `main.i` (一个ASCII文件)。
 ```bash
@@ -164,7 +164,7 @@ ELF 是 Linux 统一的二进制格式，适用于：
 
 ELF（可执行可链接格式）是可重定位目标文件的标准格式。其结构如图7.3所示，主要由三部分组成：**ELF头**、**各类型的节** 和**节头部表**。
 
-![alt text](image-1.png)
+![alt text](pic/linking-elf-structure.png)
 
 **ELF头**：位于文件开头。
   - 一个16字节的序列，描述了生成该文件的系统的字长和字节顺序。
@@ -361,7 +361,7 @@ gcc -static -o prog2c main2.o -L. -lvector
 - `-lvector`：`libvector.a` 的简写形式
 - `-L.`：指定库文件搜索路径（当前目录）
 
-![alt text](image-2.png)
+![alt text](pic/linking-static-library-linking.png)
 
 ### 6.2.3 **链接器处理静态库的机制**
 
@@ -657,7 +657,7 @@ callq sum
 
 **ELF可执行文件结构**
 
-![alt text](image-3.png)
+![alt text](pic/linking-executable-structure.png)
 
 1. **代码段**：
    - 只读权限，保护代码不被意外修改
@@ -749,7 +749,7 @@ vaddr mod align = off mod align
   - 图中各段相邻的表示是简化版，实际存在**间隙**（由于.data段对齐要求）
   - 链接器使用**地址空间布局随机化**，每次运行时的具体地址会变化，但相对位置保持不变
 
- ![alt text](image-4.png)
+ ![alt text](pic/linking-runtime-memory-layout.png)
 
 
 | 内存区域 | 位置 | 增长方向 | 内容 |
@@ -814,7 +814,7 @@ gcc -o prog2l main2.c ./libvector.so
 
 **动态链接过程**
 
-  ![alt text](image-5.png)
+  ![alt text](pic/linking-dynamic-linking-process.png)
 
   - **加载阶段**：
     - 加载器加载部分链接的可执行文件`prog2l`
@@ -1003,6 +1003,34 @@ free(0xe60010)
 ---
 
 # 14. 处理目标文件的工具
+
+**核心工具包：GNU Binutils**
+*   在 Linux 系统编程和调试中至关重要。
+*   提供了一套用于创建、检查和修改目标文件（.o）与可执行文件的工具。
+
+**主要工具及其功能：**
+
+| 工具 | 主要用途 |
+| :--- | :--- |
+| **ar** | **静态库管理**：创建、修改（增、删、列、取）`.a` 静态库文件。 |
+| **nm** | **查看符号**：列出目标文件或库中定义的函数、变量等符号（地址、类型、名称）。 |
+| **objdump** | **全能分析**：反汇编（-d）、查看节信息（-h）、查看所有头信息（-x）等。功能最强大。 |
+| **readelf** | **ELF 专业分析**：专门详细解析 ELF 格式文件的结构（节、段、符号、重定位等），信息比 objdump 更规范。 |
+| **size** | **节大小查看**：快速查看目标文件各节（.text, .data, .bss）的大小。 |
+| **strings** | **提取字符串**：从二进制文件中提取出所有可打印的字符串常量，用于初步分析。 |
+| **strip** | **删除符号**：移除目标文件中的符号表和调试信息，以减小文件体积，但会削弱可调试性。 |
+
+**共享库相关工具：**
+
+| 工具 | 主要用途 |
+| :--- | :--- |
+| **ldd** | **依赖查询**：列出一个可执行程序或共享库在运行时所需的全部共享库及其路径。 |
+
+**使用场景提示：**
+*   **初步分析**：先用 `file` 确定文件类型，再用 `nm`/`readelf -s` 看符号，用 `objdump -h`/`readelf -S` 看节信息。
+*   **深入分析**：用 `readelf` 查看所有 ELF 结构细节，用 `objdump -d` 进行反汇编分析代码逻辑。
+*   **库管理**：用 `ar` 处理静态库，用 `ldd` 排查共享库依赖问题。
+*   **发布优化**：使用 `strip` 精简最终发布的可执行文件。
 
 ---
 

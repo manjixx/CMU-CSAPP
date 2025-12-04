@@ -175,7 +175,7 @@ void touch1()
 - 从标准输入读取字符，将字符写入`rdi`指向的内存位置（即缓冲区）,**从低地址向高地址**填充缓冲区
 - **攻击原理**：当输入超过40字节时，第41-48字节会覆盖**返回地址**（当`test`函数调用`getbuf`时，`callq`指令会将下一条指令的地址`0x401976`压栈，即从`getbuf` 函数调用结束后下一条将要执行的指令），`retq`指令从栈顶弹出返回地址到`rip`。此时栈帧情况如下所示：
 
-![alt text](image.png)
+![alt text](pic/attack-getbuf-stack-frame.png)
 
 
 #### 2.1.2 答案
@@ -283,7 +283,7 @@ ret
 ```
 
 **栈帧讲解**
-![alt text](image-1.png)
+![alt text](pic/attack-level2-stack-frame.png)
 
 **获取注入代码的字节级表示**
 - 将汇编代码保存到`.s`文件中，利用指令
@@ -412,7 +412,7 @@ main:
 
 **栈帧结构**
 
-![alt text](image-2.png)
+![alt text](pic/attack-level3-stack-frame.png)
 
 
 **获取注入代码的字节级表示**
@@ -467,9 +467,9 @@ PASS: Would have posted the following:
 1.  **栈地址随机化 (ASLR)**：每次运行时栈的位置不同，无法预知注入代码的地址。
 2.  **栈不可执行 (NX/DEP)**：它将存放栈的内存区域标记为不可执行（nonexecutable），因此即使你能让程序计数器（PC）跳转到你注入代码的起始位置，程序也会因段错误（segmentation fault）而崩溃。
 
-**ROP核心思想**：不注入新代码，而是利用程序中已存在的、以`ret`指令结尾的代码片段（称为**Gadget**）。通过精心构造栈，将这些Gadget串联起来，形成一条“指令链”，以完成复杂操作。
+**ROP核心思想**：不注入新代码，而是利用程序中已存在的、以`ret`指令结尾的代码片段（称为**Gadget**）。通过精心构造栈，将这些Gadget串联起来，形成一条"指令链"，以完成复杂操作。
 
-![alt text](image-3.png)
+![alt text](pic/attack-rop-principle.png)
 
 上图展示了如何设置栈来依次执行`n`个`gadget`。在该图中，栈中包含一连串 `gadget` 的地址。每个 `gadget` 的最后一条指令都是 `0xc3`（即 ret 的机器码）。当程序从这种初始状态执行 `ret` 指令时，会启动一个 `gadget` 链：每个 `gadget` 末尾的 `ret` 指令会使得程序跳转到下一个 `gadget` 的起始地址，从而依次执行整条链。
 
@@ -517,9 +517,9 @@ void setval_210(unsigned *p) {
 *   **目标**：使用`gadget farm`中的工具，让程序跳转到`touch2`并传入`cookie`。
 *   **工具：** 可以使用以下类型的指令构造 `gadget`，并且仅限使用前八个 `x86-64` 寄存器（`%rax–%rdi`）：
     *  movq
-    ![alt text](image-4.png)
+    ![alt text](pic/attack-movq-instruction-table.png)
     *  popq
-    ![alt text](image-5.png)
+    ![alt text](pic/attack-popq-instruction-table.png)
     *  ret：单字节 `0xc3`
     *  nop：单字节 `0x90`，作用是使程序计数器（PC）前进 1 字节，不产生其他效果。
 *   **建议**
@@ -590,7 +590,7 @@ objdump -d rtarget >> readrtarget
 
 **栈布局设计（从低地址到高地址）**
 
-![alt text](image-8.png)
+![alt text](pic/attack-level4-stack-layout.png)
 
 **执行流程**
 
@@ -636,8 +636,8 @@ PASS: Would have posted the following:
 *   **方法**：
     -  构造一个复杂的ROP链,可以使用 `rtarget` 中从 `start_farm` 到 `end_farm` 之间的 `gadget`（比第 4 阶段的范围更大）
     -  需要利用`movl`指令（影响寄存器低32位）来构建`cookie`字符串的地址。
-    ![alt text](image-6.png)
+    ![alt text](pic/attack-movl-instruction-table.png)
     -  可能需要使用`nop`类指令（如`andb %al, %al`）来填充和调整栈布局。
-    ![alt text](image-7.png)
+    ![alt text](pic/attack-nop-instructions.png)
     -  最终将构建好的地址加载到`%rdi`，然后跳转到`touch3`。
 *   **关键点**：这是终极挑战，官方解法需要8个Gadget。需要深刻理解`movl`指令会清零寄存器高32位的特性。
