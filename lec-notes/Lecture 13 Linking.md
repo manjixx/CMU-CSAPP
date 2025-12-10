@@ -222,7 +222,7 @@ ELF（可执行可链接格式）是可重定位目标文件的标准格式。�
 | :--- | :--- | :--- | :--- |
 | **全局符号（Global Symbols）** | 由**本模块定义**，可被**其他模块引用** | 非静态的C函数、非静态的全局变量 | 链接器的核心处理对象，需要解析和重定位。 |
 | **外部符号（External symbols）** | 由**本模块引用**，但由**其他模块定义** | 在其他模块中定义的非静态C函数、全局变量 | 链接器需要找到其定义，否则会报"未定义引用"错误。 |
-| **局部符号（Local symbols）** | 由**本模块定义和引用**，对其他模块**不可见** | 带 `static` 属性的函数、带 `static` 属性的全局变量，而非本地代码中的变量 | 仅在模块内部可见，链接器不需要处理它们与其他模块的关系。 |
+| **局部符号（Local symbols）** | 由**本模块定义和引用**，对其他模块**不可见** | 带 `static` 属性的函数、带 `static` 属性的全局变量 | 仅在模块内部可见，链接器不需要处理它们与其他模块的关系。 |
 
 **重要辨析**：
 - **局部链接器符号** ≠ **局部程序变量（非静态）**。
@@ -333,6 +333,23 @@ Num:    Value  Size Type    Bind   Vis      Ndx Name
 
 ## 6.2 使用静态库链接
 
+
+* libc.a（1496 个 .o）
+* libm.a（444 个 .o）
+
+
+链接器解析静态库的算法
+
+1. 按命令行顺序扫描 .o 和 .a
+2. 维护当前未解析符号列表
+3. 遇到新目标文件时尝试解析未解决符号
+4. 扫描结束仍未解决 → 链接错误
+
+注意：**静态库需要放在命令行的后面**。
+
+---
+
+
 静态库是多个相关可重定位目标文件的集合，打包成单个文件（扩展名为.a），作为链接器的输入。
 
 ### 6.2.1 为什么需要静态库？
@@ -352,9 +369,6 @@ Num:    Value  Size Type    Bind   Vis      Ndx Name
 ### 6.2.2 静态库的创建与使用
 
 **创建静态库**：
-
-![alt text](image-2.png)
-
 使用 `ar` 工具将多个目标文件打包成静态库：
 ```bash
 # 编译源文件生成目标文件
@@ -363,11 +377,6 @@ gcc -c addvec.c multvec.c
 # 使用ar工具创建静态库
 ar rcs libvector.a addvec.o multvec.o
 ```
-
-常见库：
-
-* libc.a（1496 个 .o）
-* libm.a（444 个 .o）
 
 **使用静态库**：
 两种等效的使用方式：
@@ -398,15 +407,6 @@ gcc -static -o prog2c main2.o -L. -lvector
 ---
 
 ## 6.3 链接器解析库引用的算法
-
-1. 按命令行顺序扫描 .o 和 .a
-2. 维护当前未解析符号列表
-3. 遇到新目标文件时尝试解析未解决符号
-4. 扫描结束仍未解决 → 链接错误
-
-注意：**静态库需要放在命令行的后面**。
-
-
 
 ### 6.3.1 链接器解析算法
 
@@ -454,7 +454,7 @@ linux> gcc -static ./libvector.a main2.c
 
 ### 6.3.3 库的放置规则
 
-1. **基本原则**：将静态库放在**命令行末尾**
+1. **基本原则**：将库放在**命令行末尾**
 
 2. **独立库**：如果多个库彼此独立（没有交叉引用），可以按任意顺序放置在末尾
    ```bash
@@ -485,8 +485,8 @@ linux> gcc -static ./libvector.a main2.c
 
 这种机制解释了为什么在大型项目中，链接器命令行中库的顺序经常需要仔细调整，也是构建系统（如Makefile）需要正确处理库依赖关系的原因。
 
-
 ---
+
 
 # 7. 重定位（Relocation）
 
@@ -513,8 +513,6 @@ linux> gcc -static ./libvector.a main2.c
 2. **重定位节内的符号引用**
    - 修改代码和数据节中的所有符号引用，使其指向正确的运行时地址
    - 依赖**重定位条目**这一关键数据结构
-
-![alt text](image.png)
 
 ## 7.2 **重定位条目**
 
@@ -665,7 +663,7 @@ callq sum
 
 **ELF可执行文件结构**
 
-![alt text](image-1.png)
+![alt text](pic/linking-executable-structure.png)
 
 1. **代码段**：
    - 只读权限，保护代码不被意外修改
@@ -757,7 +755,7 @@ vaddr mod align = off mod align
   - 图中各段相邻的表示是简化版，实际存在**间隙**（由于.data段对齐要求）
   - 链接器使用**地址空间布局随机化**，每次运行时的具体地址会变化，但相对位置保持不变
 
- ![alt text](pic/linking-runtime-memory-layout.png)
+![alt text](image.png)
 
 
 | 内存区域 | 位置 | 增长方向 | 内容 |
@@ -879,7 +877,7 @@ gcc -o prog2l main2.c ./libvector.so
 
 ## 11.2 **动态链接编程接口**
 
-Linux 系统为动态链接器提供了一个简单的接口，允许应用程序在运行时加载和链接共享库。
+Linux 系统为动态链接器提供了一个简单的接口，允许**应用程序在运行时加载和链接共享库**。
 
 - **核心函数集**（`#include <dlfcn.h>`）
 
@@ -972,41 +970,171 @@ int main() {
 
 # 13. Library Interpositioning（库函数插桩）
 
-插桩：拦截对任意函数的调用，并替换为自定义版本。
+在程序调用共享库函数时，插入自定义逻辑，替代或扩展原始库函数。
 
-三种方式：
+Linux 链接器提供一种非常强大的机制，称为**库插桩（interpositioning）**，可以截获对共享库函数的调用，并执行你自己的代码。借助该机制，可以：
 
-## 11.1 编译时打桩
+* 统计某个库函数被调用的次数
+* 验证并打印它的输入输出参数
+* 完全替换函数的实现
 
-使用宏替换对 malloc/free 的调用。
+**核心思想：**
+针对某个目标函数，创建一个**原型完全相同的包装函数（wrapper）**。通过不同的插桩机制，让系统在调用目标函数时转而调用你的包装函数。包装通常先执行自定义逻辑，再调用真正的目标函数，并将返回值传回。
 
-## 11.2 链接时打桩
+插桩可发生在：
 
-使用 linker wrapper 技术：
+1. **编译阶段（compile time）**
+2. **链接阶段（link time）**
+3. **运行阶段（run time）——利用动态链接器 LD_PRELOAD**
 
-* malloc → `__wrap_malloc`
-* 原 malloc → `__real_malloc`
+## **13.1 编译期插桩（Compile-Time Interpositioning）**
 
-## 11.3 运行时插桩（最强）
+机制：使用**C 预处理器（CPP）宏替换**。
 
-环境变量：
+步骤：
+
+1. 自定义 `mymalloc.c`，实现 `mymalloc()` 和 `myfree()` 包装函数。
+2. 创建本地 `malloc.h`，用 `#define` 将 `malloc` → `mymalloc`，`free` → `myfree`。
+3. gcc 编译时使用 `-I.`，优先包含当前目录下的 `malloc.h`。
+
+编译命令：
 
 ```
-LD_PRELOAD=mymalloc.so ./a.out
+gcc -DCOMPILETIME -c mymalloc.c
+gcc -I. -o intc int.c mymalloc.o
+```
+
+运行输出示例：
+
+```
+malloc(32)=0x9ee010
+free(0x9ee010)
+```
+
+特征：
+需要访问**源代码**。替换发生在编译前的预处理阶段。
+
+---
+
+## **13.2 链接期插桩（Link-Time Interpositioning）**
+
+机制：
+GNU 链接器支持参数：
+
+```
+--wrap f
+```
+
+其含义：
+
+* 对符号 f 的引用 → 使用 `__wrap_f`
+* 对符号 `__real_f` 的引用 → 解析为 f
+
+包装函数示例（`__wrap_malloc` 调用 `__real_malloc`）：
+
+```c
+void *__wrap_malloc(size_t size) {
+    void *ptr = __real_malloc(size);
+    printf("malloc(%d) = %p\n", (int)size, ptr);
+    return ptr;
+}
+```
+
+编译：
+
+```
+gcc -DLINKTIME -c mymalloc.c
+gcc -c int.c
+```
+
+链接：
+
+```
+gcc -Wl,--wrap,malloc -Wl,--wrap,free -o intl int.o mymalloc.o
+```
+
+运行输出示例：
+
+```
+malloc(32) = 0x18cf010
+free(0x18cf010)
+```
+
+特征：
+需要访问**可重定位目标文件 (.o)**。
+逻辑发生在静态链接阶段。
+
+---
+
+## **13.3 运行期插桩（Run-Time Interpositioning）**
+
+机制：利用动态链接器的环境变量：
+
+```
+LD_PRELOAD
+```
+
+当执行程序时，动态链接器会**优先搜索 LD_PRELOAD 指定的共享库**中的符号，从而拦截函数调用。
+
+包装函数示例：
+
+使用 `dlsym(RTLD_NEXT, "malloc")` 来获得真正的 libc `malloc` 地址：
+
+```c
+mallocp = dlsym(RTLD_NEXT, "malloc");
+char *ptr = mallocp(size);
+printf("malloc(%d) = %p\n", (int)size, ptr);
+```
+
+构建共享库：
+
+```
+gcc -DRUNTIME -shared -fpic -o mymalloc.so mymalloc.c -ldl
+```
+
+编译主程序：
+
+```
+gcc -o intr int.c
+```
+
+运行：
+
+```
+LD_PRELOAD="./mymalloc.so" ./intr
 ```
 
 示例输出：
 
 ```
-malloc(32) = 0xe60010
-free(0xe60010)
+malloc(32) = 0x1bf7010
+free(0x1bf7010)
 ```
 
-用途：
+也可插桩任意可执行程序，例如：
 
-* 调试 / Profiler
-* 安全监控
-* 内存泄漏检测
+```
+LD_PRELOAD="./mymalloc.so" /usr/bin/uptime
+```
+
+此时 uptime 调用的 malloc/free 也会被拦截。
+
+特征：
+
+* **不需要源代码，也不需要 .o 文件**
+* 仅需可执行文件即可进行插桩
+* 最通用、最强大
+
+
+## **笔记总结（重点概念版）**
+
+**三种插桩方式对比**
+
+| 插桩方式 | 机制                   | 优点      | 缺点         | 需要的文件   |
+| ---- | -------------------- | ------- | ---------- | ------- |
+| 编译期  | 宏替换（CPP）             | 简单      | 必须能修改源代码   | 源代码     |
+| 链接期  | `--wrap` 符号重定向       | 控制粒度高   | 要重新链接目标文件  | `.o` 文件 |
+| 运行期  | `LD_PRELOAD` 动态链接优先级 | 最强、无需源码 | 仅对动态链接程序有效 | 可执行文件   |
 
 ---
 
