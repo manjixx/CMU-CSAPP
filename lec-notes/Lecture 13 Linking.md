@@ -755,7 +755,7 @@ vaddr mod align = off mod align
   - 图中各段相邻的表示是简化版，实际存在**间隙**（由于.data段对齐要求）
   - 链接器使用**地址空间布局随机化**，每次运行时的具体地址会变化，但相对位置保持不变
 
-![alt text](image.png)
+![alt text](pic/linking-runtime-memory-layout.png)
 
 
 | 内存区域 | 位置 | 增长方向 | 内容 |
