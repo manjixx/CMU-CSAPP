@@ -1,70 +1,126 @@
-# Lecture 8 异常控制流
+# Chapter 08 异常控制流（Exceptional Control Flow）
 
-## 8.0 概述
-
-### 8.0.1 控制流
-
-**控制流（Control Flow）**：PC（程序计数器）依次指向指令地址 a₀ → a₁ → …。平滑的顺序执行代表指令地址连续。
-![alt text](pic/ecf-control-flow.png)
-
-### 8.0.2 控制转移
-
-**控制转移**：程序计数器（PC）从地址 aₖ 跳转到 aₖ₊₁ 的动作。
-
-- 已知的两类控制流改变方式（传统控制流）
-  - **跳转与分支（jumps and branches）**: 由程序内部条件触发，用于基本流程控制。
-  - **调用与返回（call and return）**:用于过程调用，遵循调用栈结构。
-  - 均用于**响应程序内部状态的变化**。
-
-
-仅依赖上述机制，无法构建一个完整、可响应外部世界的现代系统，因为程序无法有效处理**系统状态的变化**，例如：
-
-* 从磁盘或网络适配器到达的数据
-* 指令发生除零错误（divide-by-zero）
-* 用户按下 Ctrl-C
-* 系统定时器到期（timer interrupt）
-
-这些事件均发生在程序逻辑之外，程序变量无法捕获所有状态变化；系统事件（定时器、I/O、中断、进程终止等）必须触发程序控制流突变。
-
-### 8.0.3 异常控制流
-
-为处理上述“系统级事件”，系统必须具备一种能够**打断当前执行流**并跳转到特定处理逻辑的机制，即：**异常控制流（ECF）**
-
-**ECF（异常控制流）**：非顺序执行的突变跳转，由硬件、操作系统、应用共同产生。
-
- 异常控制流存在于**计算机系统的各个层次**。
-
-低层机制（Low-level mechanisms）: **异常（Exceptions）**
-
-* 当系统事件发生（即系统状态发生变化）时，引起控制流的改变。
-* 由**硬件**与**操作系统软件**协同实现。
-
-高层机制（Higher-level mechanisms）
-  
-* 进程上下文切换（Process Context Switch）: 由操作系统软件与硬件定时器共同实现。
-* 信号（Signals）:由操作系统软件实现。
-* 非局部跳转（Nonlocal jumps）
-  * setjmp() 与 longjmp()
-  * 由 C 语言运行库（C runtime library）实现。
+> **课程对应**：CMU 15-213 Lecture 14–17 — Exceptional Control Flow（Exceptions, Processes, Signals, Nonlocal Jumps）
+> **教材章节**：CSAPP 第 8 章
 
 ---
 
-**总结**
+## 8.0 概述：统一视角
 
-- **学习 ECF 的重要性**
+### 8.0.1 程序的本质：(Context, Continuation) 状态机
 
-1. 理解 OS 的基础机制：I/O、进程、虚拟内存均依赖 ECF。
-2. 理解系统调用：应用与 OS 通信的唯一入口（trap）。
-3. 能编写系统类工具：Shell、Web Server 等都依赖 ECF（fork/exec/wait/signal）。
-4. 理解并发：异常处理、线程、信号触发的中断均属于并发的表现。
-5. 理解软件异常：try/catch/throw 底层依赖非局部跳转，是 ECF 的高级形式。
+CPU 执行程序，本质是不断更新一个二元组：
 
-- **本章内容结构**
+```
+程序状态 = (Context, Continuation)
 
-1. **异常（Exception）**：硬件/OS 交界处
-2. **系统调用（System Call）**：异常的一种，应用 → OS
-3. **进程（Process）与信号（Signal）**：应用/OS 交界处
-4. **非局部跳转（Nonlocal Jumps）**：应用层 ECF
+Context     = 当前完整运行状态
+              { PC, SP, 通用寄存器, 标志位, 浮点寄存器,
+                信号掩码, 页表基址, TLS, 打开的文件, ... }
+
+Continuation = “接下来去哪执行”
+              本质就是 PC 的下一个值
+```
+
+正常执行时，PC 顺序递增，Context 随每条指令更新：
+
+```
+a₀ → a₁ → a₂ → ...    （平滑的控制流）
+```
+
+**传统控制转移**（程序自身发起）：跳转/分支、函数调用/返回——改变 Continuation，但始终由程序代码控制。
+
+**问题**：纯靠程序代码无法响应来自”程序之外”的事件：I/O 完成、除零错误、用户按 Ctrl-C、定时器到期……这些事件必须能**强行改变**正在执行的控制流。这就是 ECF 存在的根本原因。
+
+---
+
+### 8.0.2 大统一视角：所有切换 = save → switch → restore
+
+无论是异常、信号还是非局部跳转，底层模式完全相同：
+
+```
+① save_context(old)     保存当前执行状态
+② modify_PC / switch    改变 Continuation（去哪执行）
+③ restore_context(new)  恢复目标执行状态
+```
+
+**三层机制的统一对比**：
+
+| 机制 | 谁触发 | 保存的内容 | 执行位置 | 谁恢复 |
+|------|--------|-----------|---------|--------|
+| **Exception**（异常）| CPU 硬件 | 寄存器 + PC → 内核栈 | 内核态 handler | `iret` 指令 |
+| **Signal**（信号）| OS 内核 | 完整用户上下文（含 FPU）→ 用户栈 | 用户态 handler | `sigreturn` 系统调用 |
+| **setjmp/longjmp** | 用户代码 | callee-saved 寄存器 + SP → `jmp_buf` | 用户态 | `longjmp` 直接写回寄存器 |
+| **进程/线程切换** | 调度器 | 完整寄存器 → PCB/TCB | 内核态 | `switch_to()` |
+
+三者共享同一模式，区别只在**触发者**、**保存范围**和**执行特权级**。
+
+> **注意 signal 与 longjmp 的关键差异**：两者模式相似，但量级不同。signal 由内核在用户栈上构造完整的 signal frame（包含 FPU/SSE 状态、信号掩码），并通过 `sigreturn` 由内核恢复；longjmp 只保存/恢复 callee-saved 寄存器（约 7 个），完全在用户态完成，无内核参与。
+
+---
+
+### 8.0.3 ECF 的三个层次
+
+```
+┌─────────────────────────────────────────────────────┐
+│  应用层：非局部跳转（setjmp / longjmp）                │  libc 实现，用户态
+├─────────────────────────────────────────────────────┤
+│  OS 层：进程切换、信号（Signals）                      │  OS 软件实现
+├─────────────────────────────────────────────────────┤
+│  硬件/OS 交界：异常（Exceptions）                      │  CPU 硬件 + OS 协同
+└─────────────────────────────────────────────────────┘
+```
+
+---
+
+### 8.0.4 延伸：Continuation 理论视角
+
+这个统一视角有更深的理论根基。在程序语言（PL）理论中，所有这些机制都归结为对 **Continuation**（延续）的操作：
+
+- `setjmp` = **捕获当前 Continuation**（存入 `jmp_buf`）
+- `longjmp` = **调用已捕获的 Continuation**（跳回去执行）
+
+这与 Scheme 的 `call/cc`（call-with-current-continuation）是同一个思想，只是语言层级不同。
+
+更进一步，所有现代”异步”抽象的底层都是同一件事：
+
+| 高层抽象 | 底层机制 |
+|---------|---------|
+| C++ 协程 / Rust async/await | 编译器将函数拆成状态机，yield = 保存 Continuation |
+| Go goroutine | 运行时在用户态做 Context 切换 |
+| Python generator | `yield` 保存栈帧（= Context）|
+| Java 虚拟线程（Loom）| JVM 在用户态做 Continuation 切换 |
+| C++ try/catch | 栈展开（stack unwinding）= 丢弃中间 Continuation |
+
+**核心公式**：
+
+```
+任何”控制流被改变”的机制
+= 保存旧 Continuation + 恢复新 Continuation
+```
+
+理解了这一点，以后遇到任何新的”切换”机制，脑内都可以自动拆解为这三步。
+
+---
+
+### 8.0.5 学习 ECF 的意义与本章结构
+
+**为什么要学 ECF**
+
+1. **理解 OS 基础机制**：I/O、进程、虚拟内存均依赖 ECF。
+2. **理解系统调用**：应用与 OS 通信的唯一入口（Trap）。
+3. **能编写系统类工具**：Shell、Web Server 等核心依赖 ECF（fork/exec/wait/signal）。
+4. **理解并发**：异常处理、线程、信号均属于并发的表现形式。
+5. **理解高级语言异常**：try/catch/throw 和 async/await 底层均是 ECF 的高层封装。
+
+**本章结构**
+
+| 主题 | 内容 | 实现层次 |
+|------|------|---------|
+| **§8.1 异常** | 4 种类型：Interrupt / Trap / Fault / Abort | 硬件 + OS 交界 |
+| **§8.2–8.4 进程** | fork / exec / waitpid / 上下文切换 | OS 软件层 |
+| **§8.5 信号** | 发送/接收/handler / 安全编写 | OS 软件层 |
+| **§8.6 非局部跳转** | setjmp / longjmp / sigsetjmp | C 运行库层 |
 
 ---
 
@@ -1119,7 +1175,7 @@ int parseline(char *buf, char **argv) {
 
 ---
 
-## 二、信号的发送（Sending a Signal）
+### 8.5.2 信号的发送（Sending a Signal）
 
 内核在以下情况发送信号：
 
@@ -1151,7 +1207,7 @@ int parseline(char *buf, char **argv) {
 
 ---
 
-## 三、信号的接收（Receiving a Signal）
+### 8.5.3 信号的接收（Receiving a Signal）
 
 当内核准备将控制权交还给用户进程时，会检查是否有 **未阻塞的待处理信号**：
 
@@ -1171,7 +1227,7 @@ int parseline(char *buf, char **argv) {
 ![alt text](pic/ecf-signal-receiving-2.png)
 ---
 
-## 四、待处理（Pending）与阻塞（Blocked）信号
+### 8.5.4 待处理（Pending）与阻塞（Blocked）信号
 
 - **待处理（Pending）**：已发送但尚未接收的信号；
   - 每种信号类型 **最多只有一个待处理实例**（**信号不排队！**）；
@@ -1187,7 +1243,7 @@ int parseline(char *buf, char **argv) {
 
 ---
 
-## 五、安装信号处理函数
+### 8.5.5 安装信号处理函数
 
 使用 `signal(signum, handler)` 安装处理函数：
 
@@ -1214,7 +1270,7 @@ int main() {
 
 ---
 
-## 六、安全编写信号处理函数的准则（Safe Signal Handling）
+### 8.5.6 安全编写信号处理函数的准则（Safe Signal Handling）
 
 信号处理函数与主程序并发执行，共享全局数据，极易引发竞态条件。编写时必须遵循：
 
@@ -1252,7 +1308,7 @@ Sigprocmask(SIG_SETMASK, &prev, NULL);
 
 ---
 
-## 七、安全输出：使用 SIO 库
+### 8.5.7 安全输出：使用 SIO 库
 
 由于 `printf` 不安全，CS:APP 提供安全 I/O 库（`csapp.c`）：
 
@@ -1267,7 +1323,7 @@ void sigint_handler(int sig) {
 
 ---
 
-## 八、正确处理 SIGCHLD（回收子进程）
+### 8.5.8 正确处理 SIGCHLD（回收子进程）
 
 ### ❌ 错误示例（信号不排队！）：
 ```c
@@ -1293,7 +1349,7 @@ void child_handler(int sig) {
 
 ---
 
-## 九、可移植信号处理：使用 `sigaction`
+### 8.5.9 可移植信号处理：使用 `sigaction`
 
 为避免不同系统行为差异，封装 `Signal` 函数：
 
@@ -1311,7 +1367,7 @@ handler_t *Signal(int signum, handler_t *handler) {
 
 ---
 
-## 十、避免竞态条件：同步主程序与信号处理
+### 8.5.10 避免竞态条件：同步主程序与信号处理
 
 ### 问题场景（Shell 添加作业）：
 ```c
@@ -1337,7 +1393,7 @@ Sigprocmask(SIG_SETMASK, &prev_one, NULL); // 解除阻塞
 
 ---
 
-## 十一、高效等待信号：使用 `sigsuspend`
+### 8.5.11 高效等待信号：使用 `sigsuspend`
 
 ### ❌ 低效轮询：
 ```c
@@ -1367,22 +1423,186 @@ while (!pid)
 
 ---
 
-## 总结
+### 8.5.12 小结
 
 | 概念 | 要点 |
 |------|------|
-| **信号本质** | 异步通知机制，类似中断 |
+| **信号本质** | 异步通知机制，类似软件中断 |
 | **发送方式** | 内核自动 / `kill()` / 键盘（Ctrl-C/Z）|
-| **接收时机** | 内核从异常返回用户态前检查 |
-| **关键限制** | 信号不排队 → 不能用于计数 |
-| **安全 handler** | 只用 async-signal-safe 函数，用 `volatile sig_atomic_t`，保护共享数据 |
-| **正确回收子进程** | `SIGCHLD` handler 中循环 `waitpid` |
-| **避免竞态** | 在关键区阻塞信号 |
-| **高效等待** | 用 `sigsuspend` 而非轮询或 `pause` |
+| **接收时机** | 内核从异常返回用户态前检查 `pending & ~blocked` |
+| **关键限制** | 信号不排队 → 不能用信号计数 |
+| **安全 handler** | 只用 async-signal-safe 函数；用 `volatile sig_atomic_t`；保护共享数据 |
+| **正确回收子进程** | `SIGCHLD` handler 中循环 `waitpid(-1, NULL, WNOHANG)` |
+| **避免竞态** | 在关键区前用 `sigprocmask` 阻塞信号 |
+| **高效等待** | 用 `sigsuspend` 而非忙等待或有竞态的 `pause` |
 
-> 信号是 Unix 进程控制的核心机制，但也因其异步性和并发性而极易出错。**谨慎设计、严格遵循安全准则**是编写可靠程序的关键。
+> 信号是 Unix 进程控制的核心机制，但因其异步性和并发性而极易出错。谨慎设计、严格遵循安全准则是编写可靠程序的关键。
 
+---
 
-## 8.6 非本地跳转
+## 8.6 非局部跳转（Nonlocal Jumps）
 
+**非局部跳转（Nonlocal Jumps）** 是 C 语言提供的一种**跨函数跳转机制**，允许程序直接从深层函数调用栈中跳回到较早保存的位置，绕过正常的函数返回链。
 
+### 8.6.1 问题背景
+
+正常函数调用遵循"压栈/弹栈"规则，必须逐层返回：
+
+```
+main → foo → bar → 出错！
+必须：bar return → foo return → main（才能在 main 里处理错误）
+```
+
+在多层嵌套的调用中，将错误信息层层传递非常繁琐。非局部跳转提供了一种"应急出口"。
+
+### 8.6.2 `setjmp` 和 `longjmp`
+
+```c
+#include <setjmp.h>
+
+/* 保存当前执行环境（寄存器、栈指针、PC 等）到 env */
+/* 第一次调用（正向执行）：返回 0 */
+/* 从 longjmp 返回时：返回 longjmp 的 val 参数（非零） */
+int setjmp(jmp_buf env);
+
+/* 恢复到 env 中保存的环境 */
+/* 永远不返回，直接跳到对应 setjmp 处继续执行 */
+/* val 若为 0，setjmp 实际返回 1（0 留给正常首次调用）*/
+void longjmp(jmp_buf env, int val);
+```
+
+**执行流程**：
+
+```
+main() {
+    rc = setjmp(env);    // ① 第一次：返回 0，继续向下
+    if (rc == 0) {
+        ...
+        foo();           // ② 进入调用链
+    } else {
+        // ⑤ 从 longjmp 跳回，rc = val
+    }
+}
+
+foo() → bar() {
+    ...
+    longjmp(env, 1);     // ③ 跳回到 setjmp 所在位置
+                         // ④ setjmp 返回 1（longjmp 的 val）
+}
+```
+
+### 8.6.3 示例：模拟 try-catch 深层错误恢复
+
+```c
+#include <stdio.h>
+#include <setjmp.h>
+
+jmp_buf env;
+
+void level3() {
+    printf("level3: 发现错误，执行非局部跳转\n");
+    longjmp(env, 1);
+}
+
+void level2() { level3(); }
+void level1() { level2(); }
+
+int main() {
+    if (setjmp(env) == 0) {
+        printf("正常执行流程\n");
+        level1();
+        printf("这行不会执行\n");
+    } else {
+        printf("捕获到来自深层的错误，进行处理\n");
+    }
+    printf("程序继续...\n");
+    return 0;
+}
+```
+
+输出：
+```
+正常执行流程
+level3: 发现错误，执行非局部跳转
+捕获到来自深层的错误，进行处理
+程序继续...
+```
+
+### 8.6.4 在信号处理函数中：`sigsetjmp` / `siglongjmp`
+
+在信号处理函数中使用非局部跳转，应使用 `sigsetjmp` / `siglongjmp`，以确保信号掩码被正确保存和恢复：
+
+```c
+#include <setjmp.h>
+#include <signal.h>
+
+sigjmp_buf env;
+
+/* sigsetjmp：savesigs=1 时保存当前信号掩码 */
+int sigsetjmp(sigjmp_buf env, int savesigs);
+
+/* siglongjmp：恢复时同时恢复信号掩码 */
+void siglongjmp(sigjmp_buf env, int val);
+```
+
+```c
+/* 经典应用：实现操作超时 */
+sigjmp_buf timeout_env;
+
+void alarm_handler(int sig) {
+    siglongjmp(timeout_env, 1);
+}
+
+int main() {
+    signal(SIGALRM, alarm_handler);
+
+    if (sigsetjmp(timeout_env, 1) == 0) {
+        alarm(5);                        // 设置 5 秒超时
+        /* 执行可能耗时很长的操作 */
+        alarm(0);                        // 操作完成，取消超时
+        printf("操作成功完成\n");
+    } else {
+        printf("操作超时\n");
+    }
+    return 0;
+}
+```
+
+### 8.6.5 注意事项
+
+**① longjmp 后局部变量值不可靠**
+
+```c
+int main() {
+    int x = 1;           // 非 volatile：longjmp 后值不确定
+    volatile int y = 1;  // volatile：longjmp 后值可靠
+
+    if (setjmp(env) == 0) { x = 99; y = 99; longjmp(env, 1); }
+    printf("x = %d\n", x);  // 不确定（可能是 1 或 99）
+    printf("y = %d\n", y);  // 确定是 99
+}
+```
+
+**② 不能 longjmp 回一个已返回的函数**
+
+`setjmp` 所在函数返回后，`jmp_buf` 指向的栈帧已失效，此时 `longjmp` 会导致未定义行为（通常直接崩溃）。
+
+**③ C++ 的 try-catch 与非局部跳转**
+
+C++ 的 `throw` / `catch` 是对非局部跳转思想的高层实现，增加了析构函数调用（栈展开）等机制。C 语言的 `longjmp` 不会调用任何析构函数或清理代码。
+
+---
+
+## 8.7 本章要点速览
+
+| 主题 | 核心要点 |
+|------|---------|
+| **ECF 定义** | 非顺序执行的控制流突变，由硬件/OS/应用三层产生 |
+| **4 种异常** | Interrupt（异步）、Trap（主动）、Fault（可恢复）、Abort（致命）|
+| **系统调用** | Trap 的最重要应用，用户态→内核态的唯一受控入口 |
+| **进程** | 运行中程序的实例，拥有独立虚拟地址空间和逻辑控制流 |
+| **fork** | 调用一次返回两次，子进程地址空间独立（写时复制）|
+| **execve** | 不创建新进程，替换当前进程的内存映像（PID 不变）|
+| **waitpid** | 回收僵尸进程；`SIGCHLD` handler 中须循环调用 |
+| **信号** | 不排队；handler 只用 async-signal-safe 函数；关键区阻塞信号 |
+| **非局部跳转** | setjmp/longjmp 实现深层错误恢复；信号中用 sigsetjmp/siglongjmp |

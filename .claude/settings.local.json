@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cp \"e:/CMU-CSAPP/labs/lab_notes/attack_lab.md\" \"e:/CMU-CSAPP/labs/lab_notes/attack_lab_backup.md\" && echo \"备份完成\")"
+    ],
+    "additionalDirectories": [
+      "e:\\CMU-CSAPP\\labs\\lab_notes"
+    ]
+  }
+}

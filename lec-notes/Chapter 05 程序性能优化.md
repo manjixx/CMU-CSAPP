@@ -1,8 +1,13 @@
-# 🧩 程序优化 — 全面学习笔记
+# Chapter 05 程序性能优化（Optimizing Program Performance）
+
+> **课程对应**：CMU 15-213 Lecture 09–10 — Program Optimization
+> **教材章节**：CSAPP 第 5 章
+
+---
 
 ## 一、概述（Overview）
 
-本文涉及的优化措施不针对任何特定设备,提及的编译器是基于GCC开展
+本文涉及的优化措施不针对任何特定设备，编译器基于 GCC 展开讨论。
 
 ### 1.1 优化的重要性与多层级特性
 
