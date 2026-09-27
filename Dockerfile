@@ -4,6 +4,12 @@ FROM ubuntu:22.04
 ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ=Asia/Shanghai
 
+# 官方 archive.ubuntu.com 在当前网络会中断，改用阿里云镜像
+RUN sed -i \
+      -e 's|http://archive.ubuntu.com/ubuntu|http://mirrors.aliyun.com/ubuntu|g' \
+      -e 's|http://security.ubuntu.com/ubuntu|http://mirrors.aliyun.com/ubuntu|g' \
+      /etc/apt/sources.list
+
 RUN apt-get update && apt-get install -y \
     build-essential \
     gcc \

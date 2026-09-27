@@ -1,8 +1,17 @@
 # 第8章 异常控制流——从零开始手把手学
 
-> **适合人群**：已掌握 C 语言基础、了解进程概念的同学
-> **学完你能做到**：解释"按下 Ctrl-C 时发生了什么"，能用 fork/exec/waitpid 写一个简单 Shell，能正确安装信号处理函数，能用 setjmp/longjmp 实现 C 语言的错误恢复
+> **适合人群**：已掌握 C 语言基础、了解进程概念的同学  
+> **学完你能做到**：解释"按下 Ctrl-C 时发生了什么"，能用 fork/exec/waitpid 写一个简单 Shell，能正确安装信号处理函数，能用 setjmp/longjmp 实现 C 语言的错误恢复  
 > **预计时间**：认真读 + 动手练，约 3 小时
+
+
+```text
+第一关：ECF 是什么          → 建立全局观，说明它不只是“异常”
+第二关：硬件/OS、OS/应用 交界 ECF     → 异常（Interrupt/Trap/Fault/Abort）
+第三关：OS 层 ECF（进程）    → 上下文切换、fork/exec/waitpid
+第四关：OS 层 ECF（信号）    → 异步通知、handler
+第五关：应用层 ECF           → setjmp/longjmp
+```
 
 ---
 
@@ -32,7 +41,7 @@ PC：地址100 → 104 → 108 → 112 → ...（顺序或分支跳转，始终�
                 ← 访问了未映射的虚拟地址（缺页故障）
 ```
 
-程序的代码里**根本没有任何地方**处理这些事件——但系统必须能响应它们。
+程序的代码里**根本没有任何地方**处理这些事件——**但系统必须能响应它们（程序正常控制流之外的事件响应机制）**。
 
 **ECF（Exceptional Control Flow，异常控制流）** 就是这个机制的总称：**当特殊事件发生时，强制改变正在执行的控制流，跳转到对应的处理代码**。
 
@@ -51,10 +60,59 @@ PC：地址100 → 104 → 108 → 112 → ...（顺序或分支跳转，始终�
 
 本章从底往上学，先搞懂底层的"异常"，再理解建立在它之上的进程、信号、非局部跳转。
 
-### 1.4 学 ECF 有什么用？
+### 1.4 ECF 的准确含义与分层
+
+ECF 是一个**总称**，指“所有正常控制流之外的控制流”。它不等于狭义的 Exception（异常）。Exception 只是 ECF 中偏底层的一种，发生在硬件/OS 交界处。
+
+ECF 包含：
+
+- **异常（Interrupt / Trap / Fault / Abort）**：硬件 + OS 协同
+- **进程上下文切换**：OS 调度
+- **信号（Signals）**：OS 异步通知
+- **非局部跳转（setjmp / longjmp）**：C 运行库，纯用户态
+
+它既包含**被动兜底**（缺页、Ctrl-C、子进程退出），也包含**主动请求**（系统调用、`fork`、`execve`、`longjmp`）。
+
+更精确的分层可以看成：
+
+```text
+用户态
+  应用代码
+  C 运行库：
+    - setjmp/longjmp：应用层 ECF，纯用户态保存/恢复寄存器
+    - stdio、malloc：普通库函数
+  系统调用包装：glibc 的 open/read/write → syscall 指令
+    → 触发 Trap 异常，属于 ECF 的异常层
+────────────────────────────────────────────── 用户态/内核态边界
+内核态
+  系统调用入口、内核子系统：VFS、文件系统、设备驱动、进程调度、信号、异常处理
+────────────────────────────────────────────── 硬件/OS 边界
+硬件
+  CPU 异常/中断、MMU、设备
+```
+
+`setjmp/longjmp` 是纯用户态实现，**不经过内核，也不依赖系统调用**。原因是：CPU 通用寄存器（PC、SP、BP、被调用者保存寄存器等）在用户态可以直接读写；只有控制寄存器、I/O 端口、页表基址等才需要内核特权。
+
+- `setjmp(env)`：把当前寄存器快照保存到 `jmp_buf` 里。
+- `longjmp(env, val)`：把快照加载回寄存器，并跳回 `setjmp` 处。
+- 这些操作都是普通用户态指令，不涉及 `syscall`。
+
+对比：
+
+| | setjmp/longjmp | 进程上下文切换 | 信号处理 |
+|---|---|---|---|
+| 谁实现 | C 运行库，纯用户态 | 内核 | 内核 + 用户态处理函数 |
+| 是否进内核 | 否 | 是 | 是 |
+| 保存什么 | 部分通用寄存器 | 完整 CPU 状态 + 地址空间 + 内核栈等 | 内核保存现场，再调用用户处理函数 |
+| 作用范围 | 同一进程内跳转 | 不同进程/线程之间切换 | 异步通知 + 用户态响应 |
+
+---
+
+
+### 1.5 学 ECF 有什么用？
 
 1. **I/O、进程、虚拟内存都依赖 ECF**：你觉得"无关紧要"的东西其实是基础中的基础
-2. **理解系统调用**：应用程序与 OS 通信的唯一正规入口（Trap）就是异常的一种
+2. **理解系统调用**：应用程序与 OS 通信的唯一正规入口（Trap）就是异常的一种，read / write 等系统调用的本质，就是通过执行 syscall 指令触发一次 Trap 异常。
 3. **能写系统类工具**：Shell、Web 服务器的核心都是 fork/exec/wait/signal
 4. **理解并发**：信号、线程、中断处理本质上是并发的表现形式
 5. **理解高级语言异常**：Java/C++ 的 try-catch-throw 底层依赖非局部跳转
@@ -71,16 +129,19 @@ PC：地址100 → 104 → 108 → 112 → ...（顺序或分支跳转，始终�
 
 按触发方式和返回行为，分为 4 类：
 
-```
-┌─────────────┬───────────────────┬──────────┬───────────────────────────┐
-│ 类型         │ 触发原因           │ 同步/异步 │ 处理完后返回到哪里          │
-├─────────────┼───────────────────┼──────────┼───────────────────────────┤
-│ Interrupt   │ I/O 设备信号       │ 异步     │ 下一条指令（程序无感）      │
-│ Trap        │ 主动执行 syscall   │ 同步     │ 下一条指令                 │
-│ Fault       │ 潜在可恢复的错误   │ 同步     │ 重新执行出错的那条指令      │
-│ Abort       │ 不可恢复的致命错误 │ 同步     │ 不返回，进程终止           │
-└─────────────┴───────────────────┴──────────┴───────────────────────────┘
-```
+| 类型 | 触发原因 | 同步/异步 | 处理完后返回到哪里 | 粗粒度理解 | Java 类比 | 说明 |
+|---|---|---|---|---|---|---|
+| **Interrupt** | I/O 设备信号，如网卡、键盘、定时器 | 异步 | 下一条指令（程序通常无感） | **正常行为** | 类似事件回调 / 异步通知 | 来自外部，与当前指令无关，不是程序错误 |
+| **Trap** | 主动执行 `syscall`，如 `read/write/fork` | 同步 | 下一条指令 | **正常行为** | 类似主动调用系统 API | 程序主动请求 OS 服务，完全正常 |
+| **Fault** | 潜在可恢复的错误，如缺页、段错误 | 同步 | 重新执行出错的那条指令 | **一半正常，一半错误** | 类似可恢复的 `Exception` | 缺页是正常机制，OS 补页后重试；非法访问才是错误 |
+| **Abort** | 不可恢复的致命错误，如硬件故障 | 同步 | 不返回，进程终止 | **错误/致命** | 类似 `Error`，不可恢复 | 无法挽救，直接杀死进程 |
+
+**一句话总结：**
+
+- **Interrupt + Trap**：不是错误，是正常控制流的一部分。  
+- **Fault**：要分情况，缺页正常，段错误才是异常。  
+- **Abort**：真正的不可恢复错误。  
+- **Java 类比**：Fault ≈ `Exception`，Abort ≈ `Error`，Interrupt/Trap 不是异常，是正常机制。
 
 **记忆口诀**：中（Interrupt）陷（Trap）故（Fault）终（Abort）— 异步无感、主动服务、可修重试、不可挽救
 
@@ -118,6 +179,15 @@ ssize_t n = read(fd, buf, 1024);
   → 这次成功！（对程序透明，感觉不到任何延迟）
 ```
 
+**Fault（故障）— 也可能修复失败，段错误是典型：**
+```
+程序访问了一个非法地址（如空指针解引用）...
+  → 触发 Page Fault / General Protection Fault
+  → OS 检查页表，发现这个地址根本不合法，无法映射
+  → 无法修复 → OS 向进程发送 SIGSEGV
+  → 进程被终止（core dump）
+```
+
 **Abort（终止）— 无法恢复**：
 ```
 内存检测到 DRAM 位翻转（硬件故障）
@@ -127,7 +197,7 @@ ssize_t n = read(fd, buf, 1024);
 
 ### 2.3 异常表：OS 维护的"紧急联系册"
 
-系统启动时，OS 在内存中建立**异常表（Exception Table）**，每个异常号对应一个处理程序地址：
+系统启动时，OS 在内存中建立**异常表（Exception Table）**，每个**异常号对应一个处理程序地址**：
 
 ```
 异常表（Exception Table）：
@@ -152,7 +222,54 @@ ssize_t n = read(fd, buf, 1024);
 ⑤ 处理程序执行完毕，根据类型决定返回到哪里
 ```
 
+**四类异常在异常表中的典型例子**（x86 为例）：
+
+| 向量号 | 名称 | 类型 | 说明 |
+|---|---|---|---|
+| 0 | Divide Error | Fault | 除以零 |
+| 3 | Breakpoint | Trap | `int3` 断点 |
+| 6 | Invalid Opcode | Fault | 非法指令 |
+| 13 | General Protection | Fault | 段错误、权限违规 |
+| 14 | Page Fault | Fault | 缺页，可能可修复，也可能不可修复 |
+| 18 | Machine Check | Abort | 硬件致命故障 |
+| 32 | Timer Interrupt | Interrupt | 时钟中断 |
+| 33 | Keyboard Interrupt | Interrupt | 键盘中断 |
+| 0x80（32 位） | System Call | Trap | Linux 传统 `int 0x80` 系统调用入口 |
+| —（`syscall` 指令） | System Call | Trap | x86-64 Linux，用 `syscall` 指令进入 |
+
+**注意**：异常表中的“异常号/向量号”和“系统调用号”是两回事。  
+- 异常向量号：用于查异常表，决定跳到哪个处理程序。  
+- 系统调用号：如 `read=0`、`write=1`，放在 `%rax` 中，用于内核分派具体系统调用。  
+- 系统调用入口本身是一个 Trap，但具体调用哪个服务由 `%rax` 决定。
+
+**异常表与分层图的对应**：
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│ 用户态                                                        │
+│   应用代码                                                    │
+│    ├─ setjmp/longjmp ──► 纯用户态跳转，不经过异常表            │
+│    └─ glibc read/write ──► syscall 指令 ──┐                   │
+└────────────────────────────────────────────┼─────────────────┘
+                                             │ ← OS/应用交界
+                                             │   Trap 作为系统调用入口
+                                             ▼
+┌──────────────────────────────────────────────────────────────┐
+│ 内核态                                                        │
+│   系统调用入口、异常表、信号递送、进程调度、文件系统、设备驱动   │
+└──────────────────────────────────────────────────────────────┘
+                    ▲
+                    │ ← 硬件/OS 交界
+                    │   异常号 / 向量号 / 中断
+┌───────────────────┴──────────────────────────────────────────┐
+│ 硬件层                                                        │
+│   CPU 异常/中断、MMU、设备、特权级机制                         │
+└──────────────────────────────────────────────────────────────┘
+```
+
 ### 2.4 系统调用：程序的"受控服务窗口"
+
+> 注意：glibc 的 `read/write` 包装本身不是 ECF，它只是进入内核的入口；真正属于 ECF 的是它执行的 `syscall` 指令触发的 **Trap 异常**。
 
 系统调用是 **用户程序请求 OS 服务的唯一正规途径**，是 Trap 最重要的应用。
 
@@ -201,9 +318,225 @@ write(1, "Hello from syscall!\n", 20)  = 20
 exit_group(0)                          = ?
 ```
 
+
+### 2.6 从系统调用回到 Trap：看见那条 `syscall` 指令
+
+2.5 用 strace 看到的是**系统调用的结果**：调了哪个、参数是什么、返回值是多少。  
+但 Trap 发生在更底层——**执行 `syscall` 指令的那一瞬间**。strace 看不到这个瞬间，但它的存在依赖这个瞬间。
+
+**第一步：反汇编 `main`，先看看它到底调了什么**
+
+```bash
+$ objdump -d -M intel syscall_hello | grep -A20 "<main>:"
+```
+
+```asm
+0000000000001169 <main>:
+    1169:   f3 0f 1e fa             endbr64                    # CET 间接跳转保护，main 入口
+    116d:   55                      push   %rbp                # 保存调用者的帧指针
+    116e:   48 89 e5                mov    %rsp,%rbp           # 建立当前栈帧：rbp = rsp
+    1171:   48 83 ec 10             sub    $0x10,%rsp          # 在栈上分配 16 字节局部空间
+    1175:   48 8d 05 88 0e 00 00    lea    0xe88(%rip),%rax    # rax = msg 的地址（"Hello from syscall!\n"）
+    117c:   48 89 45 f8             mov    %rax,-0x8(%rbp)     # 把 msg 指针存到局部变量 [rbp-8]
+    1180:   48 8b 45 f8             mov    -0x8(%rbp),%rax     # rax = msg（准备作为 write 的第 2 个参数）
+    1184:   ba 14 00 00 00          mov    $0x14,%edx          # edx = 20，write 的第 3 个参数 len
+    1189:   48 89 c6                mov    %rax,%rsi           # rsi = msg，write 的第 2 个参数 buf
+    118c:   bf 01 00 00 00          mov    $0x1,%edi           # edi = 1，write 的第 1 个参数 fd=STDOUT
+    1191:   e8 da fe ff ff          call   1070 <write@plt>    # 调用 glibc 的 write 包装，不是直接 syscall！
+    1196:   bf 00 00 00 00          mov    $0x0,%edi           # edi = 0，_exit 的参数：退出码 0
+    119b:   e8 c0 fe ff ff          call   1060 <_exit@plt>    # 调用 glibc 的 _exit 包装
+```
+
+**关键观察：这里没有 `syscall` 指令！**
+
+- 你看到的是 `call write@plt`，不是 `syscall`。
+- `write@plt` 是 PLT 跳转桩，它会跳到 glibc 里的 `write` 包装函数。
+- 真正的 `syscall` 指令在 **glibc 的 `libc.so.6` 里**，不在你的可执行文件里。
+- 所以，想看到 Trap 的触发点，需要往里再走一层。
+
+**第二步：用 gdb 跟进 glibc，看到真正的 `syscall`**
+
+```bash
+$ gdb ./syscall_hello
+(gdb) break write
+(gdb) run
+(gdb) disassemble
+```
+
+你会看到 glibc 里 `write` 的核心：
+
+```asm
+Dump of assembler code for function __GI___libc_write:
+=> 0x00007ffff7ea19c0 <+0>:     endbr64
+   0x00007ffff7ea19c4 <+4>:     mov    eax,DWORD PTR fs:0x18      # 读线程状态，判断是否需要走取消处理路径
+   0x00007ffff7ea19cc <+12>:    test   eax,eax
+   0x00007ffff7ea19ce <+14>:    jne    0x7ffff7ea19e0             # 非 0 → 走慢路径
+   0x00007ffff7ea19d0 <+16>:    mov    eax,0x1                    # write 系统调用号
+   0x00007ffff7ea19d5 <+21>:    syscall                            # ← 这里触发 Trap
+   0x00007ffff7ea19d7 <+23>:    cmp    rax,0xfffffffffffff000
+   0x00007ffff7ea19dd <+29>:    ja     0x7ffff7ea1a30             # 出错 → 设置 errno
+   0x00007ffff7ea19df <+31>:    ret
+   0x00007ffff7ea19e0 <+32>:    sub    rsp,0x28                   # 慢路径：有取消需求
+   0x00007ffff7ea19e4 <+36>:    mov    QWORD PTR [rsp+0x18],rdx
+   0x00007ffff7ea19e9 <+41>:    mov    QWORD PTR [rsp+0x10],rsi
+   0x00007ffff7ea19ee <+46>:    mov    DWORD PTR [rsp+0x8],edi
+   0x00007ffff7ea19f2 <+50>:    call   0x7ffff7e1d9b0 <__GI___pthread_enable_asynccancel>
+   0x00007ffff7ea19f7 <+55>:    mov    rdx,QWORD PTR [rsp+0x18]
+   0x00007ffff7ea19fc <+60>:    mov    rsi,QWORD PTR [rsp+0x10]
+   0x00007ffff7ea1a01 <+65>:    mov    r8d,eax
+   0x00007ffff7ea1a04 <+68>:    mov    edi,DWORD PTR [rsp+0x8]
+   0x00007ffff7ea1a08 <+72>:    mov    eax,0x1                    # 慢路径下同样放系统调用号
+   0x00007ffff7ea1a0d <+77>:    syscall                            # ← 慢路径的 Trap
+   0x00007ffff7ea1a0f <+79>:    cmp    rax,0xfffffffffffff000
+   0x00007ffff7ea1a15 <+85>:    ja     0x7ffff7ea1a48
+   0x00007ffff7ea1a17 <+87>:    mov    edi,r8d
+   0x00007ffff7ea1a1a <+90>:    mov    QWORD PTR [rsp+0x8],rax
+   0x00007ffff7ea1a1f <+95>:    call   0x7ffff7e1da20 <__GI___pthread_disable_asynccancel>
+   0x00007ffff7ea1a24 <+100>:   mov    rax,QWORD PTR [rsp+0x8]
+   0x00007ffff7ea1a29 <+105>:   add    rsp,0x28
+   0x00007ffff7ea1a2d <+109>:   ret
+   ...
+```
+
+**关键观察：**
+
+- main 里看到的是 `call write@plt`，不是 `syscall`。
+- gdb 跟进后，才在 glibc 的 `__GI___libc_write` 里看到真正的 `syscall` 指令。
+- glibc 的 `write` 分两条路径：
+  - **快路径**（+16～+31）：直接 `mov eax,0x1; syscall`，适合不需要取消处理的场景。
+  - **慢路径**（+32～+109）：先调用 `__pthread_enable_asynccancel`，再 `syscall`，最后 `__pthread_disable_asynccancel`，适合支持线程取消的场景。
+- 无论快慢路径，最终都是 `mov eax,0x1` + `syscall` 触发 Trap。
+- 出错时 `cmp rax,0xfffffffffffff000; ja ...`，把负数错误码转成 `-1` 并设置 `errno`。
+
+**第三步：断在 `syscall` 上，看执行前；再 `si`，看返回后**
+
+用户态 gdb 进不了内核。`si` 遇到 `syscall` 会把整段 Trap 一次做完，停在下一条指令。所以要先用断点停在 `syscall` **还没执行**的那一拍，记下 RIP 和寄存器，再 `si` 看回来之后。地址每次运行都不同，必须从自己的 `disassemble` 里抄，下面的 `0x7ffff7ea19d5` 只是示例。
+
+```bash
+$ gdb ./syscall_hello
+(gdb) break write
+(gdb) run
+(gdb) disassemble
+# 找到快路径那条 syscall，例如：
+#   0x00007ffff7ea19d5 <+21>: syscall
+(gdb) break *0x7ffff7ea19d5
+(gdb) continue
+```
+
+这一次停住时，指令还没执行。用 `x/i` 确认箭头打在 `syscall` 上，而不是下一条：
+
+```text
+(gdb) x/2i $rip
+=> 0x7ffff7ea19d5 <__GI___libc_write+21>:  syscall
+   0x7ffff7ea19d7 <__GI___libc_write+23>:  cmp    rax,0xfffffffffffff000
+(gdb) info registers rax rdi rsi rdx rip
+rax            0x1                 1          # 系统调用号，write
+rdi            0x1                 1          # fd
+rsi            0x555555556004      ...        # buf
+rdx            0x14                20         # count
+rip            0x7ffff7ea19d5      ...+21     # 停在 syscall 这一条上
+```
+
+然后单步。终端会先印出字符串，gdb 再停在下一条：
+
+```text
+(gdb) si
+Hello from syscall!
+0x00007ffff7ea19d7 in __GI___libc_write ()
+(gdb) x/2i $rip-2
+   0x7ffff7ea19d5 <__GI___libc_write+21>:  syscall
+=> 0x7ffff7ea19d7 <__GI___libc_write+23>:  cmp    rax,0xfffffffffffff000
+(gdb) info registers rax rip
+rax            0x14                20         # 返回值：写了 20 字节
+rip            0x7ffff7ea19d7      ...+23     # 已经离开 syscall
+```
+
+两次停止对上 Trap 的用户态两侧：
+
+| | 执行前（断点） | `si` 之后 |
+|---|---|---|
+| RIP | `...19d5`，指着 `syscall` | `...19d7`，`syscall` 的下一条 |
+| rax | `1`（调用号） | `20`（返回值） |
+| rdi / rsi / rdx | `1` / buf / `20` | 内核一般不动这三个参数 |
+
+中间那一段（ring 3 → ring 0、按 `rax=1` 进入 `sys_write`、写完再返回 ring 3）发生在这两次停止之间。`si` 不会在内核里停，所以第三步看不到内核内部。
+
+**第四步：用 `catch syscall write` 看内核入口和出口**
+
+不要把这一步当成第三步的重复。`catch syscall` 停住时，CPU 已经进过内核，ptrace 交给 gdb 的 RIP **始终是 `syscall` 的返回地址**（下一条），两次停止的 RIP 相同。真正要对比的是停住原因，以及 `rax` 和 `orig_rax`。
+
+```bash
+$ gdb ./syscall_hello
+(gdb) catch syscall write
+(gdb) run
+```
+
+第一次停住，提示是 **call to syscall**，不是 returned：
+
+```text
+Catchpoint 1 (call to syscall write), 0x00007ffff7ea19d7 in __GI___libc_write ()
+(gdb) x/i $rip
+=> 0x7ffff7ea19d7 <__GI___libc_write+23>:  cmp    rax,0xfffffffffffff000
+(gdb) info registers rax orig_rax rdi rsi rdx rip
+rax            0xffffffffffffffda  -38        # -ENOSYS，内核放的占位，不是返回值
+orig_rax       0x1                 1          # 用户放进 rax 的调用号被内核留在这里
+rdi            0x1                 1
+rsi            0x555555556004      ...
+rdx            0x14                20
+rip            0x7ffff7ea19d7      ...+23     # 已经是下一条，不是 syscall 本身
+```
+
+`rax = -38` 是 Linux 的约定：系统调用一进内核，就把 `rax` 改成 `-ENOSYS`，原来的调用号挪到 `orig_rax`。这样跟踪器如果改了调用号却没有真正执行，返回值也不会被误当成成功。所以第四步第一次看到的，是**内核入口现场**，不是第三步那种「用户还站在 `syscall` 指令上」的现场。
+
+再继续，才是返回：
+
+```text
+(gdb) continue
+Hello from syscall!
+
+Catchpoint 1 (returned from syscall write), 0x00007ffff7ea19d7 in __GI___libc_write ()
+(gdb) info registers rax orig_rax rip
+rax            0x14                20         # 这次才是返回值
+orig_rax       0x1                 1          # 调用号不变
+rip            0x7ffff7ea19d7      ...+23     # 和入口那次相同
+```
+
+两次实验合在一起，才是完整的 Trap，而不是同一种停法看两遍：
+
+| 时刻 | 怎么停 | RIP | rax | 你在看什么 |
+|---|---|---|---|---|
+| 用户即将执行 | 第三步，`break *syscall` | 指着 `syscall` | `1` | 进内核之前的用户态 |
+| 内核刚接住 | 第四步，`call to syscall` | `syscall` 的下一条 | `-38`，调用号在 `orig_rax` | 内核入口 |
+| 内核做完返回 | 第三步的 `si`，或第四步的 `returned from` | 还是下一条 | `20` | 回到用户态 |
+
+只看 RIP 会觉得第三步的「`si` 之后」和第四步的两次停止是同一个地方。区分它们要看三样东西：gdb 的提示是 `call to` 还是 `returned from`，`rax` 是 `-38` 还是 `20`，以及第三步第一次停止时 RIP 有没有落在 `syscall` 那一条上。
+
+**第五步：把 2.5、2.6 串起来**
+
+| 层次 | 看到什么 | 用什么工具 |
+|---|---|---|
+| 系统调用结果 | `write(1, "...", 20) = 20` | `strace` |
+| 用户态调用点 | `call write@plt` | `objdump`（看 main） |
+| 系统调用入口 | `mov eax,0x1` + `syscall` | `gdb`（跟进 glibc）或 `objdump`（看 libc.so） |
+| 执行前的用户态 | RIP 停在 `syscall` 上，`rax=1` | `break *syscall` |
+| 内核入口 / 出口 | 入口 `rax=-38`、`orig_rax=1`；出口 `rax=20`。两次 RIP 都在下一条 | `catch syscall` |
+| 返回后的用户态 | RIP 离开 `syscall`，`rax=20` | 在 `syscall` 上 `si` |
+
+所以：
+
+- **`strace` 看的是“系统调用做了什么”**。
+- **`objdump` 看的是“用户态怎么调用、glibc 怎么触发”**。
+- **`gdb` 要分两次看**：`break *syscall` 看执行前，`catch syscall` 看内核入口（`orig_rax`）和出口（返回值）。只比 RIP 会把这两次看成同一步。
+
+一句话：
+
+> **系统调用是 Trap 的应用层表现，Trap 是系统调用的底层入口机制。普通程序里 `syscall` 指令在 glibc 里；想在自己的可执行文件里看到它，用内联汇编绕过 glibc。三者是同一件事在不同层次上的观察结果：strace 看结果，objdump 看指令，gdb 看切换。**
+
 ---
 
 ## 第三关：进程——你的程序活在哪里？
+
+**OS 层 ECF（进程）**
 
 ### 3.1 进程 = 程序的运行实例
 
@@ -501,6 +834,8 @@ $
 
 ## 第四关：信号——进程间的"异步短信"
 
+**OS 层 ECF（信号）**
+
 ### 4.1 信号是什么
 
 **信号（Signal）** 是 OS 或其他进程发给进程的一个小型通知，只携带两个信息：**信号编号** 和 **"有信号到达"这个事实**，没有其他数据。
@@ -720,6 +1055,10 @@ sigprocmask(SIG_SETMASK, &prev, NULL);  // 解除阻塞，SIGCHLD 现在才能�
 ---
 
 ## 第五关：非局部跳转——C 的"跨函数应急出口"
+
+**应用层 ECF**
+
+> `setjmp/longjmp` 是纯用户态实现，直接保存/恢复通用寄存器，不经过异常表，也不依赖系统调用。
 
 ### 5.1 什么是非局部跳转
 
