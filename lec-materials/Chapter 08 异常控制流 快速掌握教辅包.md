@@ -616,7 +616,11 @@ $ gcc -o fork_demo fork_demo.c && ./fork_demo
 
 ### 3.3 用进程图理解多次 fork
 
-多个 fork 会产生多个进程，用进程图（树形图）分析：
+**核心规则**：  
+`fork()` 之前的代码只被原始进程执行一次；`fork()` 之后的所有代码，会被当前所有存活进程各自执行。  
+子进程从 `fork()` 返回处开始，不会重新执行之前的代码。
+
+多个 `fork()` 会产生多个进程，用进程图（树形图）分析：
 
 ```c
 void fork2() {
@@ -629,6 +633,7 @@ void fork2() {
 ```
 
 进程图：
+
 ```
                     main
                       │
@@ -645,16 +650,21 @@ void fork2() {
 
 **结果**：L0 × 1，L1 × 2，Bye × 4（顺序不确定）
 
+**为什么子进程不会重新执行 `fork()` 之前的代码？**  
+因为 `fork()` 复制了父进程的完整执行状态，程序计数器已经指向 `fork()` 的下一条指令。  
+子进程从 `fork()` 返回处开始执行，不会回头。父进程则继续往下走。  
+所以 `printf("L0\n")` 只在最初的进程里执行一次。
+
 <details>
 <summary>思考题：三个连续 fork() 会产生几个进程？</summary>
 
-8 个（包含原始进程自身）：1 → 2 → 4 → 8。
+8 个（包含原始进程自身）：1 → 2 → 4 → 8。  
 每次 fork，当前所有存活进程都各自 fork 一次，进程数翻倍。
 </details>
 
 ### 3.4 回收子进程：waitpid()
 
-子进程退出后不会立即消失——它变成**僵尸进程（Zombie）**，保留基本信息直到父进程来"收尸"：
+子进程退出后不会立即消失——它变成**僵尸进程（Zombie）**，内核只保留一条记录（PID + 退出码 + 资源统计），等父进程来“收尸”。
 
 ```
 进程生命周期：
@@ -664,29 +674,44 @@ void fork2() {
 子进程变为"孤儿进程"，被 init 进程（PID=1）收养并负责回收
 ```
 
-`waitpid()` 用法：
+**关键理解：**
+
+- **僵尸进程**：子进程已 `exit()`，内存、文件、代码全部释放，内核只留一条 `task_struct`，里面存 PID、退出状态、资源统计。它不能运行，只等父进程读走退出码。
+- **收尸**：父进程调用 `waitpid`，内核先把退出码复制到 `&status`，再删除这条记录，释放 PID。所以是“先读后删”，不是单纯删表。
+- **为什么必须父进程来收**：退出码是给父进程看的；内核不知道父进程还想不想要这个信息，所以必须保留到父进程来读。
+- **僵尸不回收的后果**：长期运行的服务若一直不收子进程，僵尸会堆积，耗尽进程表项，导致无法创建新进程。
+
+**演示代码：让僵尸窗口可见**
 
 ```c
 // waitpid_demo.c
 #include <stdio.h>
 #include <stdlib.h>
-#include <sys/wait.h>
 #include <unistd.h>
+#include <sys/wait.h>
 
 int main() {
     int status;
-
     pid_t pid = fork();
+
     if (pid == 0) {
-        printf("子进程 %d 即将以退出码 42 退出\n", getpid());
+        // 子进程：很快退出，变成僵尸
+        printf("Child process %d will exit with code 42\n", getpid());
         exit(42);
     }
 
-    // 等待任意子进程退出（pid=-1 表示任意，0 表示默认阻塞）
-    pid_t reaped = waitpid(-1, &status, 0);
+    // 父进程：先睡 10 秒，故意不回收
+    printf("Parent process %d sleeps 10 seconds...\n", getpid());
+    printf("In these 10 seconds, run in another terminal:\n");
+    printf("  ps -ef | grep %d\n", pid);
+    sleep(10);                       // ← 僵尸窗口
+
+    // 10 秒后收尸
+    printf("Parent process starts reaping...\n");
+    pid_t reaped = waitpid(pid, &status, 0);
 
     if (WIFEXITED(status)) {
-        printf("父进程：子进程 %d 正常退出，退出码 = %d\n",
+        printf("Parent process: child %d reaped, exit code = %d\n",
                reaped, WEXITSTATUS(status));
     }
     return 0;
@@ -695,8 +720,32 @@ int main() {
 
 ```bash
 $ gcc -o waitpid_demo waitpid_demo.c && ./waitpid_demo
-子进程 1235 即将以退出码 42 退出
-父进程：子进程 1235 正常退出，退出码 = 42
+Parent process 1327 sleeps 10 seconds...
+In these 10 seconds, run in another terminal:
+  ps -ef | grep 1328
+Child process 1328 will exit with code 42
+Parent process starts reaping...
+Parent process: child 1328 reaped, exit code = 42
+```
+
+在 10 秒僵尸窗口内，另开终端观察：
+
+```bash
+$ ps -ef | grep 1328
+root      1328  1327  0 13:27 pts/0    00:00:00 [waitpid_demo] <defunct>
+root      1352  1169  0 13:27 pts/1    00:00:00 grep --color=auto 1328
+```
+
+- 状态 `Z`：Zombie。
+- `<defunct>`：已失效。
+- 命令名 `[waitpid_demo]` 加方括号，表示可执行映像已不存在。
+- 父进程 PID 1327，说明它是 1327 的子进程。
+
+10 秒后父进程 `waitpid`，僵尸消失：
+
+```bash
+$ ps -ef | grep 1328
+root      1378  1169  0 13:27 pts/1    00:00:00 grep --color=auto 1328
 ```
 
 **waitpid 参数速查**：
@@ -721,6 +770,8 @@ $ gcc -o waitpid_demo waitpid_demo.c && ./waitpid_demo
 
 ### 3.5 加载新程序：execve()
 
+**概念：execve 是什么**
+
 `fork()` 是"复制"，`execve()` 是"替换"——**在当前进程中加载并运行一个全新程序**：
 
 ```c
@@ -731,7 +782,17 @@ int execve(const char *filename,  // 可执行文件路径
 // 失败时返回 -1
 ```
 
-`fork + execve` 是 Shell 执行命令的标准模式：
+**概念：为什么 Shell 必须用 `fork + execve`？**
+
+Shell 要执行命令，不能直接 `execve` 替换自己，否则 Shell 就没了；所以先 `fork` 出子进程，让子进程 `execve` 去跑命令，自己 `waitpid` 等它结束，再继续接受下一条命令。这就是 **`fork + execve` 标准模式**。
+
+具体分工：
+
+1. Shell 先 `fork` 一个子进程，自己本体不动。
+2. 子进程调用 `execve` 加载目标命令，自己“换脑”成新程序。
+3. Shell 父进程用 `waitpid` 等子进程结束，再继续接受下一条命令。
+
+**例子：`fork + execve` 执行 `/bin/ls`**
 
 ```c
 // exec_demo.c — Shell 执行命令的核心模式
@@ -766,7 +827,23 @@ total 16
 ls 命令执行完毕
 ```
 
-**fork vs exec 本质区别**：
+**过程：`fork + execve` 执行命令的步骤**
+
+```text
+Shell 进程（父）
+  │
+  ├─ fork() 产生一个子进程
+  │     │
+  │     └─ 子进程调用 execve("/bin/ls", ...)
+  │           → 子进程被替换成 ls
+  │           → ls 执行，输出到终端
+  │           → ls 退出
+  │
+  └─ 父进程 waitpid() 等待子进程结束
+        → 子进程结束后，Shell 继续提示下一行
+```
+
+**对比：fork vs exec 本质区别**
 
 ```
 fork()：   "复印机"   ← 复制当前进程，两份几乎相同，分别执行
@@ -776,7 +853,6 @@ execve()： "换脑手术" ← 用新程序替换当前进程，PID 不变但全
 ### 3.6 动手：实现一个极简 Shell
 
 ```c
-// mysh.c — 极简 Shell（核心逻辑约 35 行）
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -786,34 +862,39 @@ execve()： "换脑手术" ← 用新程序替换当前进程，PID 不变但全
 #define MAXARGS 64
 
 int main() {
-    char line[1024];
-    char *argv[MAXARGS];
+    char line[1024];        // 存放用户输入的一整行
+    char *argv[MAXARGS];    // 存放分词后的参数数组，最后以 NULL 结尾
 
     while (1) {
-        printf("mysh> ");
-        fflush(stdout);
-        if (!fgets(line, sizeof(line), stdin)) break;
+        printf("myshell> ");                // 打印提示符
+        fflush(stdout);                     // 立即刷新，否则提示符可能卡在缓冲区
+        if (!fgets(line, sizeof(line), stdin)) break;   // 读一行；EOF（Ctrl-D）则退出循环
 
-        // 分词
+        // 把这一行按空格、制表符、换行切分成多个 token
         int argc = 0;
-        char *tok = strtok(line, " \t\n");
-        while (tok && argc < MAXARGS - 1) {
-            argv[argc++] = tok;
-            tok = strtok(NULL, " \t\n");
+        char *token = strtok(line, " \t\n");
+        while (token && argc < MAXARGS - 1) {
+            argv[argc++] = token;           // 每个 token 作为一个参数
+            token = strtok(NULL, " \t\n");  // 继续取下一个 token
         }
-        argv[argc] = NULL;
-        if (argc == 0) continue;
 
-        // 内置命令
-        if (strcmp(argv[0], "quit") == 0) break;
+        argv[argc] = NULL;                  // execvp 要求参数数组以 NULL 结尾
+        if (argc == 0) continue;            // 空行，跳过
+
+        // 内置命令：quit 直接退出 shell
+        if (strcmp(argv[0], "quit") == 0) exit(0);
 
         // fork + exec 执行外部命令
         pid_t pid = fork();
         if (pid == 0) {
-            execvp(argv[0], argv);  // 在 PATH 中搜索命令
-            fprintf(stderr, "%s: 命令未找到\n", argv[0]);
+            // 子进程：用 argv[0] 在 PATH 中查找可执行文件并替换自身
+            execvp(argv[0], argv);
+            // 只有 execvp 失败才会走到这里
+            fprintf(stderr, "%s cannot find command\n", argv[0]);
             exit(1);
         }
+
+        // 父进程（shell 本体）：等子进程执行完，再回到循环顶部继续接受下一条命令
         waitpid(pid, NULL, 0);
     }
     return 0;
