@@ -902,9 +902,9 @@ int main() {
 ```
 
 ```bash
-$ gcc -o mysh mysh.c && ./mysh
-mysh> ls mysh.c
-mysh.c
+$ gcc -o mysh myshell.c && ./mysh
+mysh> ls myshell.c
+myshell.c
 mysh> echo hello world
 hello world
 mysh> quit
