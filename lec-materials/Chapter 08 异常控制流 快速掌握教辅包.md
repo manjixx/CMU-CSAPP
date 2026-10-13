@@ -1197,6 +1197,7 @@ sigprocmask(SIG_SETMASK, &prev, NULL);  // 解除阻塞，SIGCHLD 现在才能�
 **应用层 ECF**
 
 > `setjmp/longjmp` 是纯用户态实现，直接保存/恢复通用寄存器，不经过异常表，也不依赖系统调用。
+> 通用寄存器、栈指针、指令指针都是用户态可直接读写的 CPU 状态，所以只需几条 `mov` 就能完成快照与恢复，不改变特权级、不切换地址空间。
 
 ### 5.1 什么是非局部跳转
 
@@ -1214,6 +1215,19 @@ sigprocmask(SIG_SETMASK, &prev, NULL);  // 解除阻塞，SIGCHLD 现在才能�
 
 这类似于其他语言的异常处理（Java 的 try-catch），但是在 C 语言层面、没有语言级支持的情况下实现的。
 
+**与 Java 异常的关键区别**：
+
+| 方面 | C 的 `setjmp/longjmp` | Java 的 `try-catch` |
+|---|---|---|
+| 语法支持 | 无，靠库函数 | 语言内置 |
+| 跳转方向 | 向上跳出到之前 `setjmp` 的位置 | 向上抛出到匹配的 `catch` |
+| 携带信息 | 只能带一个 `int` | 可携带异常对象、类型、消息、栈轨迹 |
+| 类型匹配 | 无 | 按异常类型匹配 |
+| 栈展开 | 直接复位栈指针，不执行清理 | 执行 `finally`、`catch` |
+| 中间层清理 | **不会**执行 | 会执行 `finally` |
+
+`longjmp` 更像“带栈复位的超级 `goto`”，中间层的局部变量、`malloc` 内存、打开的文件、加锁的互斥量都不会被清理。
+
 ### 5.2 setjmp / longjmp API
 
 ```c
@@ -1229,6 +1243,8 @@ int setjmp(jmp_buf env);
 // val 不能为 0（若传 0，setjmp 实际返回 1）
 void longjmp(jmp_buf env, int val);
 ```
+
+**注意**：`longjmp` 跳回的是 `setjmp` 的调用点，不是直接跳到 `else`。`setjmp` 第二次返回非零值后，`if` 条件判断才自然进入 `else` 分支。
 
 ### 5.3 完整示例：模拟 try-catch 错误处理
 
@@ -1290,7 +1306,51 @@ main: 程序继续执行...
 
 ### 5.4 在信号处理函数中使用：siglongjmp
 
-在信号处理函数中要用 `sigsetjmp` / `siglongjmp`（而不是普通的 setjmp/longjmp），原因是需要正确保存/恢复信号掩码：
+在信号处理函数中要用 `sigsetjmp` / `siglongjmp`（而不是普通的 `setjmp/longjmp`），原因是需要正确保存/恢复信号掩码。
+
+**问题根源**：handler 执行期间，内核自动把当前信号加入 `blocked`；正常 `return` 时内核自动移除，但 `longjmp` 跳走不经过这条路径。
+
+**两种跳转的行为对比**：
+
+```text
+普通 longjmp 跳走：
+
+  handler 执行中
+    内核 blocked: { SIGALRM }        ← 内核自动加上
+    │
+    │  longjmp(env, 1)
+    │  （只恢复寄存器，不碰掩码）
+    ▼
+  回到 main
+    内核 blocked: { SIGALRM }        ← 仍然阻塞！超时机制失效 ❌
+
+
+siglongjmp 跳走：
+
+  sigsetjmp(env, 1) 时
+    内核 blocked: { }                 ← 空
+    用户 env->__saved_mask: { }       ← 通过 sigprocmask 读出来存一份
+
+  handler 执行中
+    内核 blocked: { SIGALRM }        ← 内核自动加上
+    │
+    │  siglongjmp(env, 1)
+    │  ① sigprocmask 把 env->__saved_mask 写回内核
+    │  ② 恢复寄存器并跳转
+    ▼
+  回到 main
+    内核 blocked: { }                 ← 被旧掩码覆盖，SIGALRM 解除 ✅
+```
+
+**`sigsetjmp/siglongjmp` 的关键动作**：
+
+- `sigsetjmp(env, 1)`：保存寄存器后，用 `sigprocmask(SIG_SETMASK, NULL, &env->__saved_mask)` 把当前信号掩码**读**到用户态 `env` 里存一份。
+- `siglongjmp(env, 1)`：先用 `sigprocmask(SIG_SETMASK, &env->__saved_mask, NULL)` 把这份掩码**写**回内核，覆盖当前掩码；再恢复寄存器并跳转。
+- 第二个参数 `1` 是 `savemask` 标志：非 0 保存掩码；0 等价于普通 `setjmp` 行为。
+
+`sigprocmask` 和 `siglongjmp` 都是 POSIX 列出的 async-signal-safe 函数，可以在信号 handler 中安全调用。
+
+**示例代码**：
 
 ```c
 // timeout_demo.c — 用信号 + siglongjmp 实现操作超时
@@ -1346,6 +1406,12 @@ int main() {
 // setjmp 所在函数已经 return 后，jmp_buf 指向的栈帧已无效
 // longjmp 到那里会导致未定义行为（通常直接崩溃）
 ```
+
+**其他注意点**：
+
+- `longjmp` 会跳过中间层的栈帧，**不执行任何清理代码**。如果中间层有 `malloc` 的内存、打开的文件、加锁的互斥量，都会泄漏或死锁。
+- 在信号 handler 中跳转后，被中断的系统调用（如 `fgets`）内部状态可能不一致，继续使用相关资源需谨慎。
+- `siglongjmp` 的第二个参数不能为 0，否则 `sigsetjmp` 返回 0，会误判成“第一次进入”，可能陷入死循环。
 
 ---
 
@@ -1417,10 +1483,6 @@ void handler(int sig) {
 ## 综合练习：能"自我管理"的进程
 
 ```c
-// managed_child.c
-// 综合练习：fork + execve + 信号 + waitpid
-// 功能：创建子进程执行 sleep，父进程等待，超时后强制终止
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -1428,79 +1490,90 @@ void handler(int sig) {
 #include <unistd.h>
 #include <sys/wait.h>
 #include <setjmp.h>
+#include <errno.h>
 
-sigjmp_buf timeout_env;
-pid_t child_pid;
+sigjmp_buf env;    // 声明一个 sigjmp_buf 类型的变量，用于保存环境信息
+pid_t child_pid;    // 子进程的 PID
 
 void alarm_handler(int sig) {
-    siglongjmp(timeout_env, 1);
+    siglongjmp(env, 1);    // 回到 sigsetjmp 的位置，返回值为 1
 }
 
-void sigchld_handler(int sig) {
+void sigchild_handler(int sig) {
     int status;
     pid_t pid;
-    int saved_errno = errno;
-    while ((pid = waitpid(-1, &status, WNOHANG)) > 0) {
-        if (WIFEXITED(status))
-            printf("子进程 %d 正常退出，退出码 %d\n", pid, WEXITSTATUS(status));
-        else if (WIFSIGNALED(status))
-            printf("子进程 %d 被信号 %d 杀死\n", pid, WTERMSIG(status));
+    int saved_errno = errno;    // 保存 errno，以防被 waitpid 修改
+    while((pid = waitpid(-1, &status, WNOHANG)) > 0) {
+        if(WIFEXITED(status)) {
+            alarm(0);    // 子进程正常退出，取消闹钟
+            siglongjmp(env, 2);    // 回到 sigsetjmp 的位置，返回值为 2
+            printf("Child %d exited with status %d\n", pid, WEXITSTATUS(status));
+        } else if(WIFSIGNALED(status)) {
+            alarm(0);    // 子进程被信号终止，取消闹钟
+            siglongjmp(env, 2);    // 回到 sigsetjmp 的位置，返回值为 2
+            printf("Child %d terminated by signal %d\n", pid, WTERMSIG(status));
+        }
     }
-    errno = saved_errno;
+    errno = saved_errno;    // 恢复 errno
 }
 
-int main(int argc, char *argv[]) {
-    int timeout = (argc > 1) ? atoi(argv[1]) : 3;
-    int sleep_time = (argc > 2) ? atoi(argv[2]) : 5;
+int main(int argc, char *argv[]){
+    int timeout = (argc > 1) ? atoi(argv[1]) : 3;   // 默认超时时间为 3 秒
+    int sleep_time = (argc > 2) ? atoi(argv[2]) : 5;   // 默认子进程睡眠时间为 5 秒
 
-    signal(SIGALRM, alarm_handler);
-    signal(SIGCHLD, sigchld_handler);
 
-    child_pid = fork();
-    if (child_pid == 0) {
+    signal(SIGALRM, alarm_handler);    // 注册 SIGALRM 信号处理函数
+    signal(SIGCHLD, sigchild_handler);    // 注册 SIGCHLD 信号处理函数
+
+    child_pid = fork();    // 创建子进程
+    if(child_pid == 0) {
         // 子进程：执行 sleep
         char sleep_arg[16];
         snprintf(sleep_arg, sizeof(sleep_arg), "%d", sleep_time);
         char *argv[] = {"sleep", sleep_arg, NULL};
-        execvp("sleep", argv);
-        perror("execvp");
-        exit(1);
+        execvp("sleep", argv);    // 执行 sleep 命令
+        perror("execvp failed");    // 如果 execvp 返回，说明执行失败
+        exit(1);    // 退出子进程，返回错误码
     }
 
-    printf("子进程 %d 开始执行（sleep %d 秒），超时限制 %d 秒\n",
-           child_pid, sleep_time, timeout);
+    printf("main: waiting for child process %d to start execute sleep %d and finish with timeout %d seconds\n", child_pid, sleep_time, timeout);
 
-    if (sigsetjmp(timeout_env, 1) == 0) {
-        alarm(timeout);
-        // 等待 SIGCHLD（子进程结束）
-        while (1) pause();
-    } else {
-        // 超时
-        printf("超时！强制终止子进程 %d\n", child_pid);
+    int rc = sigsetjmp(env, 1);
+
+    if(rc == 0) {
+        alarm(timeout);    // 设置一个超时闹钟
+        while (1) {
+            pause();    // 暂停进程，等待信号
+        }
+    } else if (rc == 1) {
+        // 超时路径
+        printf("main: timeout, killing child process %d\n", child_pid);
         kill(child_pid, SIGKILL);
         waitpid(child_pid, NULL, 0);
+    } else {
+        // rc == 2，子进程已结束，正常退出
+        printf("main: child process %d finished before timeout\n", child_pid);
     }
-
-    printf("程序结束\n");
+    printf("main: end\n");
     return 0;
 }
+
 ```
 
 ```bash
 $ gcc -o managed_child managed_child.c
 
 # 测试1：子进程在超时前结束
-$ ./managed_child 5 2
-子进程 1234 开始执行（sleep 2 秒），超时限制 5 秒
-子进程 1234 正常退出，退出码 0
-程序结束
+./managed_child 5 2
+main: waiting for child process 9233 to start execute sleep 2 and finish with timeout 5 seconds
+main: child process 9233 finished before timeout
+main: end
 
 # 测试2：子进程超时被强制终止
-$ ./managed_child 3 10
-子进程 1235 开始执行（sleep 10 秒），超时限制 3 秒
-超时！强制终止子进程 1235
-子进程 1235 被信号 9 杀死
-程序结束
+./managed_child 3 10
+main: waiting for child process 9253 to start execute sleep 10 and finish with timeout 3 seconds
+main: timeout, killing child process 9253
+main: end
 ```
 
 ---
